@@ -24,12 +24,23 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Book, Folder, ReadingProgress, UploadBatch
+from .models import (
+    Book,
+    Bookmark,
+    Folder,
+    Highlight,
+    PageNote,
+    ReadingProgress,
+    UploadBatch,
+)
 from .outline import outline_for
 from .ranges import serve_file
 from .serializers import (
+    BookmarkSerializer,
     BookSerializer,
     FolderSerializer,
+    HighlightSerializer,
+    PageNoteSerializer,
     ProgressWriteSerializer,
     ReadingProgressSerializer,
     UploadBatchSerializer,
@@ -562,3 +573,104 @@ class ContinueReadingView(OwnedMixin, APIView):
             book._reader_progress = [record]
             books.append(book)
         return Response(BookSerializer(books, many=True, context={"request": request}).data)
+
+
+class AnnotationListView(OwnedMixin, APIView):
+    """List and create one kind of annotation on a book.
+
+    Two checks on every request, not one: that the row belongs to the caller,
+    and that the caller may still read the book it is on. They answer different
+    questions — sharing can be revoked after an annotation was made (PRD §29).
+    """
+
+    model = None
+    serializer_class = None
+
+    def queryset_for(self, book):
+        return self.model.objects.filter(user=self.request.user, book=book)
+
+    @extend_schema(summary="List annotations")
+    def get(self, request, book_id: int):
+        book = self.get_book(book_id)
+        queryset = self.queryset_for(book)
+        if "page" in request.GET:
+            # The reader asks per visible page; a heavily annotated 900-page
+            # book is a lot of JSON to hand a phone all at once.
+            queryset = queryset.filter(page=request.GET["page"])
+        return Response(self.serializer_class(queryset, many=True).data)
+
+    @extend_schema(summary="Create an annotation")
+    def post(self, request, book_id: int):
+        book = self.get_book(book_id)
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            serializer.save(user=request.user, book=book)
+        except IntegrityError:
+            return Response({"detail": "That already exists."},
+                            status=status.HTTP_409_CONFLICT)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class AnnotationDetailView(OwnedMixin, APIView):
+    model = None
+    serializer_class = None
+
+    def get_object(self, request, book_id: int, annotation_id: int):
+        book = self.get_book(book_id)
+        obj = self.model.objects.filter(
+            pk=annotation_id, user=request.user, book=book,
+        ).first()
+        if obj is None:
+            raise Http404
+        return obj
+
+    @extend_schema(summary="Update an annotation")
+    def patch(self, request, book_id: int, annotation_id: int):
+        obj = self.get_object(request, book_id, annotation_id)
+        serializer = self.serializer_class(obj, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
+
+    @extend_schema(summary="Delete an annotation",
+                   responses={204: OpenApiResponse(description="Deleted")})
+    def delete(self, request, book_id: int, annotation_id: int):
+        self.get_object(request, book_id, annotation_id).delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@csrf_required
+class BookmarkListView(AnnotationListView):
+    model = Bookmark
+    serializer_class = BookmarkSerializer
+
+
+@csrf_required
+class BookmarkDetailView(AnnotationDetailView):
+    model = Bookmark
+    serializer_class = BookmarkSerializer
+
+
+@csrf_required
+class HighlightListView(AnnotationListView):
+    model = Highlight
+    serializer_class = HighlightSerializer
+
+
+@csrf_required
+class HighlightDetailView(AnnotationDetailView):
+    model = Highlight
+    serializer_class = HighlightSerializer
+
+
+@csrf_required
+class PageNoteListView(AnnotationListView):
+    model = PageNote
+    serializer_class = PageNoteSerializer
+
+
+@csrf_required
+class PageNoteDetailView(AnnotationDetailView):
+    model = PageNote
+    serializer_class = PageNoteSerializer

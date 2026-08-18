@@ -2,7 +2,17 @@ from __future__ import annotations
 
 from rest_framework import serializers
 
-from .models import Book, BookSource, Folder, ReadingProgress, UploadBatch
+from .annotations import validate_position_data
+from .models import (
+    Book,
+    Bookmark,
+    BookSource,
+    Folder,
+    Highlight,
+    PageNote,
+    ReadingProgress,
+    UploadBatch,
+)
 
 
 class FolderSerializer(serializers.ModelSerializer):
@@ -130,3 +140,38 @@ class UploadBatchSerializer(serializers.ModelSerializer):
         fields = ("id", "kind", "original_filename", "target_folder", "status", "counts",
                   "error_summary", "created_at", "started_at", "finished_at")
         read_only_fields = fields
+
+
+class BookmarkSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Bookmark
+        fields = ("id", "page", "page_fraction", "label", "created_at")
+        read_only_fields = ("id", "created_at")
+
+
+class HighlightSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Highlight
+        fields = ("id", "page", "selected_text", "position_data", "colour", "note",
+                  "created_at", "updated_at")
+        read_only_fields = ("id", "created_at", "updated_at")
+
+    def validate_position_data(self, value):
+        return validate_position_data(value)
+
+    def validate_selected_text(self, value: str) -> str:
+        # Generous, but bounded: this is the passage, not the book.
+        return value[:5000]
+
+
+class PageNoteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PageNote
+        fields = ("id", "page", "body", "created_at", "updated_at")
+        read_only_fields = ("id", "created_at", "updated_at")
+
+    def validate_body(self, value: str) -> str:
+        body = value.strip()
+        if not body:
+            raise serializers.ValidationError("A note needs some text.")
+        return body[:20000]

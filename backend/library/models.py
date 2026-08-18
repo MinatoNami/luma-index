@@ -314,6 +314,102 @@ class ReadingProgress(models.Model):
         return 0 < self.percentage < 99.5
 
 
+class Bookmark(models.Model):
+    """A remembered place. Private to the reader who made it (PRD §22)."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="bookmarks"
+    )
+    # Bookmarks hang off the Book, never the BookSource: PRD §13 requires a
+    # file going missing to leave a reader's notes intact, and pointing at the
+    # source would delete them with it.
+    book = models.ForeignKey(Book, on_delete=models.CASCADE, related_name="bookmarks")
+
+    page = models.PositiveIntegerField()
+    page_fraction = models.FloatField(default=0.0)
+    label = models.CharField(max_length=255, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["page"]
+        indexes = [models.Index(fields=["user", "book", "page"])]
+        constraints = [
+            models.UniqueConstraint(fields=["user", "book", "page"],
+                                    name="one_bookmark_per_page")
+        ]
+
+    def __str__(self) -> str:
+        return self.label or f"page {self.page + 1}"
+
+
+class Highlight(models.Model):
+    """Highlighted text, optionally with a note attached.
+
+    `position_data` is versioned from the first write. Once readers have
+    highlights the coordinates cannot be recomputed — the mapping depended on a
+    viewport that no longer exists — so the shape has to be right now rather
+    than migrated later. See docs/phases/05-reading-data.md.
+    """
+
+    class Colour(models.TextChoices):
+        YELLOW = "yellow", "Yellow"
+        GREEN = "green", "Green"
+        BLUE = "blue", "Blue"
+        PINK = "pink", "Pink"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="highlights"
+    )
+    book = models.ForeignKey(Book, on_delete=models.CASCADE, related_name="highlights")
+
+    page = models.PositiveIntegerField()
+    selected_text = models.TextField(blank=True)
+    # {"v": 1, "quads": [{"x1","y1","x2","y2"}, ...], "text_offsets": {...}}
+    # Quads in PDF user space, so a highlight means the same thing at any zoom
+    # and on any screen (PRD §23).
+    position_data = models.JSONField(default=dict)
+    colour = models.CharField(max_length=16, choices=Colour.choices, default=Colour.YELLOW)
+    note = models.TextField(blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["page", "created_at"]
+        indexes = [models.Index(fields=["user", "book", "page"])]
+
+    def __str__(self) -> str:
+        return self.selected_text[:60] or f"highlight on page {self.page + 1}"
+
+
+class PageNote(models.Model):
+    """A note about a page rather than about a passage.
+
+    Exists because §27 defers OCR: a scanned book has no text layer, so a
+    text-anchored highlight is impossible there. Without page notes the feature
+    would be missing from exactly the books most likely to need one.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="page_notes"
+    )
+    book = models.ForeignKey(Book, on_delete=models.CASCADE, related_name="page_notes")
+
+    page = models.PositiveIntegerField()
+    body = models.TextField()
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["page", "created_at"]
+        indexes = [models.Index(fields=["user", "book", "page"])]
+
+    def __str__(self) -> str:
+        return self.body[:60]
+
+
 class UploadBatch(models.Model):
     """One upload the worker has to chew through.
 

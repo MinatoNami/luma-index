@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Book, BookSource, Folder, UploadBatch
+from .models import Book, Bookmark, BookSource, Folder, Highlight, PageNote, UploadBatch
 
 
 class BookSourceInline(admin.StackedInline):
@@ -50,3 +50,30 @@ class UploadBatchAdmin(admin.ModelAdmin):
 
     def has_add_permission(self, request) -> bool:
         return False
+
+
+# Registered for operational visibility only. PRD §8 is explicit that admin
+# status must not expose private annotations through the normal application UI;
+# Django Admin is the separate, audited path.
+@admin.register(Bookmark)
+class BookmarkAdmin(admin.ModelAdmin):
+    list_display = ("book", "user", "page", "label", "created_at")
+    list_filter = ("created_at",)
+    search_fields = ("book__title", "user__email")
+    list_select_related = ("book", "user")
+
+
+@admin.register(Highlight)
+class HighlightAdmin(admin.ModelAdmin):
+    list_display = ("book", "user", "page", "colour", "created_at")
+    list_filter = ("colour", "created_at")
+    search_fields = ("book__title", "user__email")
+    list_select_related = ("book", "user")
+
+
+@admin.register(PageNote)
+class PageNoteAdmin(admin.ModelAdmin):
+    list_display = ("book", "user", "page", "created_at")
+    list_filter = ("created_at",)
+    search_fields = ("book__title", "user__email")
+    list_select_related = ("book", "user")
