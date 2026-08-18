@@ -139,3 +139,46 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
 
 def build_reset_token(user) -> tuple[str, str]:
     return urlsafe_base64_encode(force_bytes(user.pk)), default_token_generator.make_token(user)
+
+
+class ProfileSerializer(serializers.ModelSerializer):
+    """Editable profile fields.
+
+    Email is read-only: changing it is an identity change that needs
+    verification of the new address, and half-doing that is worse than not
+    offering it.
+    """
+
+    class Meta:
+        model = User
+        fields = ("id", "email", "display_name", "role", "is_staff", "created_at")
+        read_only_fields = ("id", "email", "role", "is_staff", "created_at")
+
+    def validate_display_name(self, value: str) -> str:
+        return value.strip()[:150]
+
+
+class UserSettingsSerializer(serializers.ModelSerializer):
+    class Meta:
+        from .settings_models import UserSettings
+
+        model = UserSettings
+        fields = ("theme", "library_view", "reader_mode", "reader_zoom", "sidebar_open")
+
+
+class AccountDeleteSerializer(serializers.Serializer):
+    """Deleting an account destroys uploaded files, so it asks for the password
+    again — a signed-in session on an unattended laptop should not be enough."""
+
+    password = serializers.CharField(write_only=True)
+    confirm = serializers.CharField()
+
+    def validate_password(self, value: str) -> str:
+        if not self.context["request"].user.check_password(value):
+            raise serializers.ValidationError("That password is not correct.")
+        return value
+
+    def validate_confirm(self, value: str) -> str:
+        if value.strip().lower() != "delete":
+            raise serializers.ValidationError('Type "delete" to confirm.')
+        return value

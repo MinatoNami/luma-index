@@ -31,14 +31,18 @@ from common.net import client_ip_for_log
 from common.throttling import TargetedAccountThrottle
 
 from .serializers import (
+    AccountDeleteSerializer,
     LoginSerializer,
     PasswordChangeSerializer,
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
+    ProfileSerializer,
     RegisterSerializer,
     UserSerializer,
+    UserSettingsSerializer,
     build_reset_token,
 )
+from .settings_models import UserSettings
 
 logger = logging.getLogger("lumaindex.accounts")
 
@@ -150,9 +154,11 @@ class PasswordChangeView(APIView):
         serializer.is_valid(raise_exception=True)
         request.user.set_password(serializer.validated_data["new_password"])
         request.user.save(update_fields=["password", "updated_at"])
-        # Keeps this device signed in; other sessions keep working until they
-        # expire. Tighten to a full session flush if you want change-password
-        # to sign out every other device.
+        # Every other session is already dead at this point: Django derives the
+        # session auth hash from the password hash and verifies it on each
+        # request, so changing the password signs out every other device. This
+        # call re-stamps the *current* session so the user who just changed it
+        # is not signed out too.
         update_session_auth_hash(request, request.user)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -226,4 +232,85 @@ class PasswordResetConfirmView(APIView):
                     extra={"event": "auth.reset.completed", "user_id": user.pk})
         # No automatic sign-in: whoever holds the link is not yet proven to be
         # the account owner beyond controlling the mailbox.
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@csrf_required
+class ProfileView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(summary="Your profile", responses={200: ProfileSerializer})
+    def get(self, request):
+        return Response(ProfileSerializer(request.user).data)
+
+    @extend_schema(summary="Update your profile", request=ProfileSerializer,
+                   responses={200: ProfileSerializer})
+    def patch(self, request):
+        serializer = ProfileSerializer(request.user, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
+
+
+@csrf_required
+class UserSettingsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(summary="Your preferences", responses={200: UserSettingsSerializer})
+    def get(self, request):
+        return Response(UserSettingsSerializer(UserSettings.for_user(request.user)).data)
+
+    @extend_schema(summary="Update your preferences", request=UserSettingsSerializer,
+                   responses={200: UserSettingsSerializer})
+    def patch(self, request):
+        serializer = UserSettingsSerializer(
+            UserSettings.for_user(request.user), data=request.data, partial=True,
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
+
+
+@csrf_required
+class AccountDeleteView(APIView):
+    """PRD §33: a user must be able to delete their application account."""
+
+    permission_classes = [IsAuthenticated]
+    throttle_scope = "auth"
+
+    @extend_schema(
+        summary="Delete your account",
+        request=AccountDeleteSerializer,
+        responses={204: OpenApiResponse(description="Account and files deleted")},
+    )
+    def post(self, request):
+        serializer = AccountDeleteSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+
+        user = request.user
+        user_id = user.pk
+
+        # Collect the storage keys before the rows go: once the books are
+        # deleted there is nothing left pointing at the files, and they would
+        # sit on disk forever.
+        from library.models import BookSource
+        from library.storage import LibraryStorage
+
+        keys = list(
+            BookSource.objects.filter(book__owner=user).values_list("storage_key", flat=True)
+        )
+
+        logout(request)
+        user.delete()
+
+        storage = LibraryStorage()
+        removed = 0
+        for key in set(keys):
+            # Another account may hold the same bytes; the check keeps their
+            # copy intact.
+            removed += bool(storage.delete_if_unreferenced(key))
+
+        logger.warning("account deleted",
+                       extra={"event": "auth.account.deleted", "user_id": user_id,
+                              "files_removed": removed})
         return Response(status=status.HTTP_204_NO_CONTENT)

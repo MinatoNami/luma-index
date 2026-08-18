@@ -430,3 +430,183 @@ def test_reset_requires_csrf(user):
     c = Client(enforce_csrf_checks=True)
     assert c.post(reverse("accounts:password-reset"), {"email": "alice@example.com"},
                   content_type="application/json").status_code == 403
+
+
+# --- Profile, settings, account deletion -------------------------------------- #
+
+@pytest.mark.django_db
+def test_password_change_signs_out_other_devices(user):
+    """Django derives the session auth hash from the password hash and checks it
+    on every request, so a password change invalidates every other session.
+    The comment in the view used to claim the opposite."""
+    laptop = Client()
+    laptop.force_login(user)
+    phone = Client()
+    phone.force_login(user)
+    assert phone.get(reverse("accounts:session")).status_code == 200
+
+    laptop.get(reverse("accounts:csrf"))
+    response = laptop.post(
+        reverse("accounts:password-change"),
+        {"current_password": PASSWORD, "new_password": "a-brand-new-passphrase-42"},
+        content_type="application/json",
+        headers={"x-csrftoken": laptop.cookies["lumaindex_csrftoken"].value},
+    )
+    assert response.status_code == 204
+
+    assert laptop.get(reverse("accounts:session")).status_code == 200, \
+        "signed out the device that changed the password"
+    assert phone.get(reverse("accounts:session")).status_code == 204, \
+        "the other device stayed signed in"
+
+
+@pytest.mark.django_db
+def test_display_name_can_be_changed(client: Client, user):
+    client.force_login(user)
+    client.get(reverse("accounts:csrf"))
+    response = client.patch(reverse("accounts:profile"), {"display_name": "  Alice A.  "},
+                            content_type="application/json",
+                            headers={"x-csrftoken": client.cookies["lumaindex_csrftoken"].value})
+    assert response.status_code == 200
+    user.refresh_from_db()
+    assert user.display_name == "Alice A."
+
+
+@pytest.mark.django_db
+def test_email_and_role_are_not_editable_through_the_profile(client: Client, user):
+    """Email is an identity change needing verification; role is a privilege."""
+    client.force_login(user)
+    client.get(reverse("accounts:csrf"))
+    client.patch(reverse("accounts:profile"),
+                 {"email": "someone-else@example.com", "role": "admin", "is_staff": True},
+                 content_type="application/json",
+                 headers={"x-csrftoken": client.cookies["lumaindex_csrftoken"].value})
+    user.refresh_from_db()
+    assert user.email == "alice@example.com"
+    assert user.role == User.Role.USER
+    assert user.is_staff is False
+
+
+@pytest.mark.django_db
+def test_settings_are_created_on_first_read(client: Client, user):
+    client.force_login(user)
+    body = client.get(reverse("accounts:settings")).json()
+    assert body["theme"] == "system"
+    assert body["library_view"] == "list"
+
+
+@pytest.mark.django_db
+def test_settings_persist_so_they_follow_a_device(client: Client, user):
+    client.force_login(user)
+    client.get(reverse("accounts:csrf"))
+    client.patch(reverse("accounts:settings"), {"theme": "dark", "library_view": "large"},
+                 content_type="application/json",
+                 headers={"x-csrftoken": client.cookies["lumaindex_csrftoken"].value})
+
+    elsewhere = Client()
+    elsewhere.force_login(user)
+    body = elsewhere.get(reverse("accounts:settings")).json()
+    assert body["theme"] == "dark"
+    assert body["library_view"] == "large"
+
+
+@pytest.mark.django_db
+def test_settings_reject_an_unknown_value(client: Client, user):
+    client.force_login(user)
+    client.get(reverse("accounts:csrf"))
+    response = client.patch(reverse("accounts:settings"), {"theme": "neon"},
+                            content_type="application/json",
+                            headers={"x-csrftoken": client.cookies["lumaindex_csrftoken"].value})
+    assert response.status_code == 400
+
+
+@pytest.mark.django_db
+def test_another_users_settings_are_untouchable(client: Client, user):
+    """There is no id in the URL — the endpoint only ever serves the caller."""
+    other = User.objects.create_user(email="bob@example.com", password=PASSWORD)
+    client.force_login(user)
+    client.get(reverse("accounts:csrf"))
+    client.patch(reverse("accounts:settings"), {"theme": "dark"},
+                 content_type="application/json",
+                 headers={"x-csrftoken": client.cookies["lumaindex_csrftoken"].value})
+
+    from accounts.settings_models import UserSettings
+    assert UserSettings.for_user(other).theme == "system"
+
+
+def _delete_account(client, **payload):
+    client.get(reverse("accounts:csrf"))
+    return client.post(reverse("accounts:account-delete"), payload,
+                       content_type="application/json",
+                       headers={"x-csrftoken": client.cookies["lumaindex_csrftoken"].value})
+
+
+@pytest.mark.django_db
+def test_account_deletion_needs_the_password(client: Client, user):
+    client.force_login(user)
+    response = _delete_account(client, password="wrong", confirm="delete")
+    assert response.status_code == 400
+    assert User.objects.filter(pk=user.pk).exists()
+
+
+@pytest.mark.django_db
+def test_account_deletion_needs_the_typed_confirmation(client: Client, user):
+    client.force_login(user)
+    response = _delete_account(client, password=PASSWORD, confirm="yes")
+    assert response.status_code == 400
+    assert User.objects.filter(pk=user.pk).exists()
+
+
+@pytest.mark.django_db
+def test_account_deletion_removes_the_user_and_their_files(client: Client, user, settings):
+    from library.models import Book, BookSource
+    from library.storage import LibraryStorage
+
+    storage = LibraryStorage()
+    blob = storage.store_stream(iter([b"%PDF-1.4 mine"]))
+    book = Book.objects.create(owner=user, title="Mine")
+    BookSource.objects.create(book=book, storage_key=blob.storage_key,
+                              original_filename="Mine.pdf", file_size=blob.size)
+
+    client.force_login(user)
+    assert _delete_account(client, password=PASSWORD, confirm="delete").status_code == 204
+
+    assert not User.objects.filter(pk=user.pk).exists()
+    assert not Book.objects.filter(pk=book.pk).exists()
+    assert not storage.exists(blob.storage_key), "the uploaded file was left on disk"
+
+
+@pytest.mark.django_db
+def test_account_deletion_keeps_a_file_another_user_still_has(client: Client, user, settings):
+    """Content addressing means two accounts can share one blob."""
+    from library.models import Book, BookSource
+    from library.storage import LibraryStorage
+
+    storage = LibraryStorage()
+    blob = storage.store_stream(iter([b"%PDF-1.4 shared"]))
+    other = User.objects.create_user(email="bob@example.com", password=PASSWORD)
+    for owner in (user, other):
+        book = Book.objects.create(owner=owner, title="Shared")
+        BookSource.objects.create(book=book, storage_key=blob.storage_key,
+                                  original_filename="Shared.pdf", file_size=blob.size)
+
+    client.force_login(user)
+    _delete_account(client, password=PASSWORD, confirm="delete")
+
+    assert storage.exists(blob.storage_key), "deleted the other account's only copy"
+    assert Book.objects.filter(owner=other).exists()
+
+
+@pytest.mark.django_db
+def test_account_deletion_signs_the_user_out(client: Client, user):
+    client.force_login(user)
+    _delete_account(client, password=PASSWORD, confirm="delete")
+    assert client.get(reverse("accounts:session")).status_code == 204
+
+
+@pytest.mark.django_db
+def test_settings_endpoints_require_authentication():
+    anon = Client()
+    for name in ("accounts:profile", "accounts:settings"):
+        assert anon.get(reverse(name)).status_code == 403
+    assert anon.post(reverse("accounts:account-delete")).status_code == 403

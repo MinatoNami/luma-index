@@ -83,3 +83,8 @@ class User(AbstractBaseUser, PermissionsMixin):
     @property
     def is_admin(self) -> bool:
         return self.role == self.Role.ADMIN
+
+
+# Imported here so `accounts.models.UserSettings` resolves and migrations pick
+# it up; it lives in its own module to keep the identity model uncluttered.
+from .settings_models import UserSettings  # noqa: E402,F401
