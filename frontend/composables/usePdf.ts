@@ -218,3 +218,60 @@ export async function* searchDocument(
     yield { page: number, matches, done: number === doc.numPages }
   }
 }
+
+
+/**
+ * Turns a DOM text selection into quads in PDF user space.
+ *
+ * The browser reports the selection as viewport rectangles, which mean nothing
+ * once the zoom changes. `convertToPdfPoint` maps them back into the
+ * document's own coordinate system, where the same numbers describe the same
+ * words on any screen at any scale — which is what PRD §23 asks for.
+ */
+export function selectionToQuads(
+  selection: Selection,
+  pageElement: HTMLElement,
+  page: PDFPageProxy,
+  scale: number,
+): { quads: { x1: number; y1: number; x2: number; y2: number }[]; text: string } | null {
+  if (selection.isCollapsed || selection.rangeCount === 0) return null
+
+  const range = selection.getRangeAt(0)
+  if (!pageElement.contains(range.commonAncestorContainer)) return null
+
+  const text = selection.toString().trim()
+  if (!text) return null
+
+  const origin = pageElement.getBoundingClientRect()
+  const viewport = page.getViewport({ scale })
+  const quads: { x1: number; y1: number; x2: number; y2: number }[] = []
+
+  for (const rect of range.getClientRects()) {
+    // Sub-pixel rectangles are artefacts of line breaks, not selected text.
+    if (rect.width < 1 || rect.height < 1) continue
+    const [x1, y1] = viewport.convertToPdfPoint(rect.left - origin.left, rect.top - origin.top)
+    const [x2, y2] = viewport.convertToPdfPoint(rect.right - origin.left,
+                                                rect.bottom - origin.top)
+    quads.push({ x1: Math.min(x1, x2), y1: Math.min(y1, y2),
+                 x2: Math.max(x1, x2), y2: Math.max(y1, y2) })
+  }
+
+  return quads.length ? { quads, text } : null
+}
+
+/** The inverse: where a stored quad sits on screen at the current scale. */
+export function quadToBox(
+  quad: { x1: number; y1: number; x2: number; y2: number },
+  page: PDFPageProxy,
+  scale: number,
+): { left: number; top: number; width: number; height: number } {
+  const viewport = page.getViewport({ scale })
+  const [ax, ay] = viewport.convertToViewportPoint(quad.x1, quad.y1)
+  const [bx, by] = viewport.convertToViewportPoint(quad.x2, quad.y2)
+  return {
+    left: Math.min(ax, bx),
+    top: Math.min(ay, by),
+    width: Math.abs(bx - ax),
+    height: Math.abs(by - ay),
+  }
+}

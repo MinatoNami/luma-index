@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { PageRenderer, loadPdf, renderTextLayer, scaleFor, searchDocument,
-         type FitMode, type SearchMatch } from '~/composables/usePdf'
+import { PageRenderer, loadPdf, quadToBox, renderTextLayer, scaleFor, searchDocument,
+         selectionToQuads, type FitMode, type SearchMatch } from '~/composables/usePdf'
+import type { Highlight, Quad } from '~/composables/useAnnotations'
 
 /**
  * The reader.
@@ -19,12 +20,16 @@ const props = defineProps<{
   initialFraction?: number
   mode: 'continuous' | 'single'
   fit: FitMode
+  highlights?: Highlight[]
 }>()
 
 const emit = defineEmits<{
   position: [{ page: number; fraction: number }]
   loaded: [{ pageCount: number }]
   error: [string]
+  select: [{ page: number; quads: Quad[]; text: string; x: number; y: number }]
+  clearSelection: []
+  openHighlight: [number]
 }>()
 
 // How many pages either side of the visible one keep their canvas.
@@ -113,6 +118,7 @@ async function renderPage(number: number) {
       await renderTextLayer(page, textLayer, scale.value)
       if (query.value) markHits(textLayer)
     }
+    await paintHighlights(number)
   } catch (error: any) {
     rendered.delete(number)
     emit('error', error?.message || 'A page failed to render.')
@@ -120,6 +126,85 @@ async function renderPage(number: number) {
     // A render that lands after the last scroll pass still has to be paid for.
     scheduleBudget()
   }
+}
+
+/**
+ * Position stored highlights over a rendered page.
+ *
+ * Projected from PDF user space on every render, which is what makes a
+ * highlight land on the same words after a zoom change rather than drifting.
+ */
+async function paintHighlights(number: number) {
+  const host = hostFor(number)
+  const layer = host?.querySelector('.highlightLayer') as HTMLElement | null
+  if (!layer || !renderer) return
+
+  const forPage = (props.highlights ?? []).filter(h => h.page === number - 1)
+  layer.replaceChildren()
+  if (!forPage.length) return
+
+  const page = await renderer.page(number)
+  for (const highlight of forPage) {
+    for (const quad of highlight.position_data?.quads ?? []) {
+      const box = quadToBox(quad, page, scale.value)
+      const mark = document.createElement('div')
+      mark.className = `highlight-mark ${highlight.colour}`
+      mark.style.left = `${box.left}px`
+      mark.style.top = `${box.top}px`
+      mark.style.width = `${box.width}px`
+      mark.style.height = `${box.height}px`
+      mark.dataset.highlight = String(highlight.id)
+      if (highlight.note) mark.classList.add('has-note')
+      mark.title = highlight.note || highlight.selected_text
+      layer.append(mark)
+    }
+  }
+}
+
+function repaintAllHighlights() {
+  for (const number of [...rendered]) paintHighlights(number)
+}
+
+watch(() => props.highlights, repaintAllHighlights, { deep: true })
+
+function onLayerClick(event: MouseEvent) {
+  const target = (event.target as HTMLElement).closest('.highlight-mark') as HTMLElement | null
+  if (target?.dataset.highlight) emit('openHighlight', Number(target.dataset.highlight))
+}
+
+/** A finished selection inside a page becomes quads the server can store. */
+async function onSelectionEnd(event: MouseEvent | TouchEvent) {
+  const selection = window.getSelection()
+  if (!selection || selection.isCollapsed) {
+    emit('clearSelection')
+    return
+  }
+
+  const anchor = selection.anchorNode
+  const host = [...hosts.values()].find(el => el.contains(anchor as Node))
+  if (!host || !renderer) {
+    emit('clearSelection')
+    return
+  }
+
+  const number = Number(host.dataset.page)
+  const page = await renderer.page(number)
+  const result = selectionToQuads(selection, host, page, scale.value)
+  if (!result) {
+    emit('clearSelection')
+    return
+  }
+
+  const point = 'changedTouches' in event && event.changedTouches.length
+    ? event.changedTouches[0]
+    : (event as MouseEvent)
+  emit('select', {
+    page: number - 1,
+    quads: result.quads,
+    text: result.text,
+    x: point.clientX,
+    y: point.clientY,
+  })
 }
 
 function releasePage(number: number) {
@@ -144,6 +229,7 @@ function releasePage(number: number) {
     host.style.removeProperty('height')
     // The text layer is as expensive to keep as the canvas.
     host.querySelector('.textLayer')?.replaceChildren()
+    host.querySelector('.highlightLayer')?.replaceChildren()
   }
 }
 
@@ -339,6 +425,7 @@ function selectMatch(index: number) {
 
 defineExpose({
   doc: computed(() => renderer?.doc ?? null),
+  repaintHighlights: repaintAllHighlights,
   goTo,
   next: () => goTo(current.value + 1),
   previous: () => goTo(current.value - 1),
@@ -432,7 +519,8 @@ onBeforeUnmount(() => resizeObserver?.disconnect())
 </script>
 
 <template>
-  <div ref="viewport" class="viewport" @scroll.passive="onScroll">
+  <div ref="viewport" class="viewport" @scroll.passive="onScroll"
+       @mouseup="onSelectionEnd" @touchend="onSelectionEnd">
     <p v-if="failed" class="notice notice-error" role="alert">
       <AppIcon name="warning" :size="17" /> {{ failed }}
     </p>
@@ -442,6 +530,7 @@ onBeforeUnmount(() => resizeObserver?.disconnect())
            :ref="el => registerHost(number, el as Element | null)"
            :data-page="number" :style="pageStyle">
         <canvas />
+        <div class="highlightLayer" @click="onLayerClick" />
         <div class="textLayer" />
         <span v-if="!rendered.has(number)" class="page-number">{{ number }}</span>
       </div>
@@ -475,6 +564,21 @@ onBeforeUnmount(() => resizeObserver?.disconnect())
   flex: none;
 }
 .page canvas { display: block; border-radius: 2px; position: relative; z-index: 0; }
+
+/* Under the text layer, so selection still works over a highlight. */
+.highlightLayer { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
+:deep(.highlight-mark) {
+  position: absolute;
+  border-radius: 2px;
+  pointer-events: auto;
+  cursor: pointer;
+  mix-blend-mode: multiply;
+}
+:deep(.highlight-mark.yellow) { background: rgb(255 214 79 / 55%); }
+:deep(.highlight-mark.green)  { background: rgb(126 217 148 / 55%); }
+:deep(.highlight-mark.blue)   { background: rgb(130 177 255 / 55%); }
+:deep(.highlight-mark.pink)   { background: rgb(255 156 196 / 55%); }
+:deep(.highlight-mark.has-note) { box-shadow: inset 0 -2px 0 rgb(0 0 0 / 35%); }
 .page-number {
   position: absolute; color: var(--text-tertiary); font-size: var(--text-sm);
 }
