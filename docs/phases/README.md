@@ -71,5 +71,5 @@ progress conflict rule, the highlight anchoring format, the deletion matrix,
 proxy trust — they make a recommendation and say why, so the choice is
 reviewable rather than accidental.
 
-Open items that do not belong to a single phase are in
-[open-questions.md](../open-questions.md).
+Open items that do not belong to a single phase are in the README's
+[Known gaps](../../README.md#known-gaps).

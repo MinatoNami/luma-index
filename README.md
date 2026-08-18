@@ -1,106 +1,156 @@
 # LumaIndex
 
-A self-hosted, multi-user web application for browsing, organizing, sharing, and reading PDF ebooks.
+A self-hosted PDF library and reader for a household or a small team.
 
-Users sign in with a normal application account, upload their PDFs — one at a time, or as a ZIP whose folder structure is rebuilt on import — and organise them in folders they can create, rename, move, and delete. LumaIndex owns the files; everything else lives in Django/PostgreSQL.
+Upload your PDFs, organise them in folders, and read them in the browser — on a
+desktop, a tablet, or a phone. Books are private until you choose to share one,
+and everyone who reads a book keeps their own place in it along with their own
+bookmarks, highlights, and notes.
 
-> **Note:** the PRD in this repository specifies Google Drive as canonical storage. That was built and then removed in favour of uploads. Where the PRD and this README disagree about storage, this README is current; the PRD remains the reference for the reader, sharing, and annotation phases still to come.
+It runs as five containers on one Ubuntu machine — PostgreSQL, Django, Nuxt,
+Caddy and a background worker — reachable over
+[Tailscale](https://tailscale.com) and nothing else.
 
-Designed to run on an Ubuntu server behind Tailscale, and to be read from desktop, tablet, and mobile browsers.
-
----
-
-## Status
-
-**Phases 1, 2, 4, 5 and 6 are built**, and Phase 3 in part. Hardening (Phase 7)
-is what remains. See [Known gaps](#known-gaps) for what is unproven.
-
-Working today: Docker Compose stack, PostgreSQL, Django + DRF with a custom
-user model, session-cookie authentication with password reset, Django Admin, an
-OpenAPI schema, PDF and ZIP upload with folder-structure import, a folder tree
-with rename/move/trash, content-addressed storage, an ingest worker that probes
-page counts and renders thumbnails, a Nuxt file browser, and a one-command SSH
-deploy to Ubuntu behind Tailscale.
-
-Working today also: a PDF.js reader with continuous and single-page modes,
-zoom, text selection, in-book search, page thumbnails, an outline sidebar, and
-reading position synced across devices. Bookmarks, highlights and notes have a
-tested API; their interface is written but unverified.
-
-Sharing works: a book is private until its owner shares it, after which anyone
-signed in can read it while keeping their own reading position and notes.
-
-Not built yet: Phase 3's collections and favourites, and Phase 7's hardening
-pass.
-
-- [lumaindex-prd.md](lumaindex-prd.md) — the full PRD, and the source of truth
-  for scope and behaviour. Where this README and the PRD disagree, the PRD wins.
-- [docs/deployment.md](docs/deployment.md) — deploying, backups, troubleshooting.
-- [docs/open-questions.md](docs/open-questions.md) — gaps the PRD leaves open,
-  with the decision each one needs and when it has to be made.
-- [docs/phases/](docs/phases/) — Phases 2–7 scoped: data models, APIs, risks,
-  and the decisions to settle before writing each one.
+> **On the PRD.** [`lumaindex-prd.md`](lumaindex-prd.md) is the original
+> specification and still governs the reader, sharing, and annotation
+> behaviour. Its storage chapters do not: it assumed Google Drive was canonical
+> storage, that was built, and it was then replaced by direct uploads. Where the
+> two disagree about *storage*, this README is current.
 
 ---
 
-## Known gaps
+## What it does
 
-Things that are built but unproven, or deliberately missing. Kept here so none
-of it has to be rediscovered.
-
-### Unverified
-
-| What | Why it is unverified |
+| | |
 | --- | --- |
-| **The annotation UI**, partly | Creating highlights is confirmed working in a real browser. Removing, recolouring and note-editing were added afterwards and have not been exercised there yet. |
-| **Single-page mode painting** | Page navigation in single-page mode is fixed and verified as far as this environment allows: the page element is replaced correctly and the counter tracks it. Whether the new page actually *paints* still needs a real browser. |
+| **Upload** | Drop in PDFs, or a ZIP whose folder structure is rebuilt on import. Identical files are stored once. |
+| **Organise** | Folders you create, rename, move, and delete. Deleting goes to a trash you can restore from. |
+| **Read** | A PDF.js reader: continuous scroll or single page, zoom, text selection, search within the book, an outline sidebar, page thumbnails. |
+| **Resume** | Your place is saved as you read and picked up on any other device. |
+| **Annotate** | Bookmarks, highlighted passages in four colours, notes on a highlight, and page notes for scans with no text layer. |
+| **Share** | Mark a book shared and anyone signed in can read it — while keeping their own place and their own notes. |
 
-Both of the above share one cause: the development preview pane cannot render
-PDFs at all. PDF.js drives its render loop with `requestAnimationFrame`, and the
-pane runs with `document.visibilityState: 'hidden'`, where rAF never fires — so
-a render never completes and nothing downstream of it runs. Anything that needs
-pixels on a page has to be checked in a real browser.
-| **The reader on a tablet** | PRD §39 calls tablet a primary reading target. Touch selection and memory behaviour have only been checked on a desktop browser. |
+## What it deliberately does not do
 
-### Missing on purpose, for now
+No EPUB, no OCR, no AI features, no public sign-up, no anonymous reading, and no
+sharing with named individuals or groups — sharing is all-or-nothing within the
+instance. These are the PRD's non-goals (§42) and remain so.
 
-| What | Consequence |
-| --- | --- |
-| **Per-user storage quotas** | There is a global maximum upload size and a free-disk floor, but nothing stops one account filling the disk. Fine for a household; needed before strangers share an instance. |
-| **Moving items to an arbitrary folder** | The row menu offers "move up one level" only. No folder picker and no drag-onto-folder, which is the main place this still feels less capable than Drive. |
-| **Real email delivery** | Password reset works, but the console backend prints reset links into the backend log. Anyone who can read logs can take over any account, so point `LUMA_EMAIL_BACKEND` at an SMTP relay before a second person has an account. |
-| **Off-box backups** | `deploy.sh backup` writes to the same host it is backing up. That covers "I broke the database", not "the disk died" — copy dumps and the `library` volume somewhere else on a schedule. The restore procedure itself has now been rehearsed against a scratch database and is written up in [docs/deployment.md](docs/deployment.md#the-restore-drill). |
-| **Emptying the trash automatically** | Trashed items stay until deleted by hand. |
-| **Sharing with named people or groups** | §16 keeps the MVP to private or shared-with-everyone-signed-in. The richer model is §43 future work; it would change `library/permissions.py` and nothing else. |
-| **Collections and favourites** | Phase 3's remaining half. Search, sort, and the three views exist; the many-to-many layer does not. |
+---
 
-### Decisions still open
+## How it works
 
-- **Whether large reads should bypass gunicorn** — byte ranges work, so a big
-  book opens quickly, but a long download still occupies a worker for its
-  duration. A tuning question now rather than a design one.
+```text
+                    Your devices, on the tailnet
+                              │
+                              │  https://luma.your-tailnet.ts.net
+                              ▼
+                     ┌─────────────────┐
+                     │ tailscale serve │  terminates TLS with a real
+                     └────────┬────────┘  certificate for the MagicDNS name
+                              │  http, loopback only
+                              ▼
+                     ┌─────────────────┐
+                     │      Caddy      │  one origin, so no CORS and the
+                     └───┬─────────┬───┘  session cookie stays SameSite=Lax
+             /api,/admin │         │ everything else
+                         ▼         ▼
+              ┌──────────────┐  ┌────────┐
+              │ Django + DRF │  │ Nuxt 3 │
+              │              │  │ PDF.js │
+              │ auth         │  └────────┘
+              │ authorization│
+              │ uploads      │
+              │ PDF delivery │
+              └───┬──────┬───┘
+                  │      │
+        ┌─────────▼─┐  ┌─▼──────────────────────────┐
+        │PostgreSQL │  │ library/     uploaded PDFs │ ← canonical, back this up
+        │           │  │ thumbnails/  covers        │ ← regenerable
+        └───────────┘  │ staging/     in-flight     │ ← scratch
+              ▲        └────────────────────────────┘
+              │
+     ┌────────┴────────┐
+     │  ingest worker  │  extracts ZIPs, probes page counts,
+     └─────────────────┘  detects text layers, renders covers
+```
 
-The deletion matrix that PRD §33 leaves undefined is settled and enforced —
-the table is in the docstring of `backend/library/lifecycle.py`.
+**Nothing is published beyond `127.0.0.1`.** Caddy binds to loopback and
+`tailscale serve` is the only way in, so the app is never exposed to the LAN or
+the internet — while still getting a real TLS certificate, which is what makes
+`Secure` cookies work.
+
+### What happens when you open a book
+
+1. The browser asks Django for the book. Django checks you may read it — you own
+   it, or its owner shared it — and returns 404 if not. **404, not 403: a 403
+   would confirm the book exists.**
+2. PDF.js asks for a byte range rather than the whole file. Django answers
+   `206 Partial Content`, so a 500-page book opens on page one instead of after
+   a full download.
+3. Pages render to canvases as they come near the viewport, and their canvases
+   are thrown away as they leave. No more than a handful hold pixels at once —
+   a 535-page book stays around 40 MB rather than growing without limit.
+4. Your position is reported as you scroll, debounced, and written to the server
+   so another device can pick it up.
+
+### What happens when you upload a ZIP
+
+The request stores the archive and returns immediately; extracting a few hundred
+books would time out. The ingest worker picks it up, validates every entry
+before writing anything, rebuilds the folder structure, and then probes each PDF
+for its page count, whether it has a text layer, and a cover image.
+
+Archives are treated as hostile: entries that escape the target directory,
+symlinks, compression bombs, and entries lying about their size are all rejected
+before a byte is written.
+
+---
+
+## Data model
+
+```text
+Folder ──┐
+         ├── Book ──── BookSource ──── a file in library/
+         │     │
+         │     ├── ReadingProgress ┐
+         │     ├── Bookmark        ├─ one set per reader, private
+         │     ├── Highlight       │
+         │     └── PageNote        ┘
+```
+
+Three shapes carry the design:
+
+- **`Book` is separate from `BookSource`.** The reader and library never touch
+  the file directly, so a replaced scan — or another storage provider — can
+  change the bytes without disturbing anything written about the book.
+- **Annotations hang off `Book`, never `BookSource`.** A file going missing
+  flags the source and leaves every note intact.
+- **Storage is content-addressed.** A file's SHA-256 is its identity and its
+  path, so uploading the same PDF twice stores one copy and a retried import
+  costs no extra disk. A file is deleted only once no book references it.
+
+Deleting is a **trash**. An uploaded PDF may be the only copy its owner has, so
+deletion is reversible and destroying it is a separate, explicit step.
 
 ---
 
 ## Quick start
 
-Local:
+Locally, with hot reload:
 
 ```bash
 cp .env.example .env && docker compose -f compose.yaml -f compose.dev.yaml up --build
 ```
 
-To the server:
+To a server — one-time preparation, then deploys:
 
 ```bash
 cp deploy/deploy.env.example deploy/deploy.env   # where to deploy
 ```
 
 ```bash
-./deploy/deploy.sh bootstrap                      # one-time server prep
+./deploy/deploy.sh bootstrap                      # docker, ufw, tailscale serve
 ```
 
 ```bash
@@ -111,189 +161,113 @@ cp .env.example .env && $EDITOR .env              # fill in every CHANGE_ME
 ./deploy/deploy.sh env:push && ./deploy/deploy.sh
 ```
 
-Full walkthrough in [docs/deployment.md](docs/deployment.md).
+Deploys build on the server, flip a symlink only after the build succeeds, gate
+on a readiness check, and roll back automatically if the new release never
+becomes healthy. Full walkthrough, backups, and troubleshooting in
+[docs/deployment.md](docs/deployment.md).
 
 ---
 
-## Core principles
+## Known gaps
 
-1. The **Django user is the canonical application identity**. Google is not.
-2. **Books are private by default.**
-3. Shared books are readable by any authenticated user on the instance.
-4. Reading progress, bookmarks, highlights, and notes are **always per-user and private by default**.
-5. Uploaded files are **canonical and irreplaceable** — nothing is ever evicted to reclaim space, and deletion is reversible until it is explicitly made permanent.
-6. Uploaded archives are **hostile input** until proven otherwise.
-7. **Authorization is always enforced server-side by Django** — never by hiding UI in Nuxt.
+Things built but unproven, or deliberately missing.
+
+### Unverified
+
+| What | Detail |
+| --- | --- |
+| **Removing and recolouring highlights** | Creating them is confirmed working in a real browser. The remove/recolour/note controls were added afterwards and have not been exercised there. |
+| **Single-page mode painting** | Navigation is fixed and verified as far as the tooling allows — the page element is replaced correctly and the counter tracks it. Whether the new page paints needs a real browser. |
+| **The reader on a tablet** | PRD §39 calls tablet a primary reading target. Touch selection and memory behaviour have only been checked on a desktop browser. |
+
+The first two share a cause: the development preview pane cannot render PDFs at
+all. PDF.js drives its render loop with `requestAnimationFrame`, and that pane
+runs with `document.visibilityState: 'hidden'`, where rAF never fires — so a
+render never completes and nothing downstream of it runs. **Anything needing
+pixels on a page has to be checked in a real browser.**
+
+### Missing for now
+
+| What | Consequence |
+| --- | --- |
+| **Per-user storage quotas** | A global maximum upload size and a free-disk floor exist, but nothing stops one account filling the disk. |
+| **Moving to an arbitrary folder** | The row menu offers "move up one level" only — no folder picker, no drag-onto-folder. The main place this feels less capable than Drive. |
+| **Real email delivery** | Password reset works, but the console backend prints reset links into the log. Point `LUMA_EMAIL_BACKEND` at an SMTP relay before a second person has an account. |
+| **Off-box backups** | `deploy.sh backup` writes to the host it is backing up. The restore procedure itself has been rehearsed — see [the drill](docs/deployment.md#the-restore-drill) — but copying dumps and the `library` volume elsewhere is still manual. |
+| **Emptying the trash automatically** | Trashed items stay until deleted by hand. |
+| **Collections and favourites** | Phase 3's remaining half. Search, sort, and the three library views exist; the many-to-many layer does not. |
+| **Sharing with named people or groups** | §16 keeps this to private or shared-with-everyone-signed-in. The richer model is §43 future work and would change `library/permissions.py` alone. |
+
+### Open question
+
+**Whether large reads should bypass gunicorn.** Byte ranges work, so a big book
+opens quickly, but a long download still occupies a worker for its duration. A
+tuning question now rather than a design one.
 
 ---
+
+## Status
+
+| Phase | State |
+| --- | --- |
+| 1 — Platform, auth, deployment | Built |
+| 2 — Uploads, folders, storage | Built |
+| 3 — Library | Views, search and sort built; collections and favourites not |
+| 4 — PDF reader | Built |
+| 5 — Bookmarks, highlights, notes | Built |
+| 6 — Sharing | Built |
+| 7 — Hardening | Built |
+
+307 backend tests, including a 64-case object-level permission matrix.
+
+---
+
+## Repository
+
+```text
+backend/            Django + DRF
+  accounts/           users, sessions, password reset, preferences
+  library/            folders, books, storage, uploads, reader data, sharing
+  api/                routing, health probes, OpenAPI schema
+  common/             logging with credential redaction, advisory locks
+frontend/           Nuxt 3 — library browser, reader, settings
+caddy/              reverse proxy configuration
+deploy/             bootstrap.sh and deploy.sh
+docs/               deployment guide and per-phase design records
+scripts/            check-contrast.py — verifies the palette against WCAG AA
+```
 
 ## Tech stack
 
 | Layer | Choice |
 | --- | --- |
 | Frontend | Nuxt 3, Vue 3, TypeScript, PDF.js |
-| Backend | Django, Django REST Framework |
-| Database | PostgreSQL |
-| Documents | pypdfium2 (probing, thumbnails), Pillow |
-| Deployment | Docker Compose, Ubuntu Server, Tailscale |
+| Backend | Django 5.2 LTS, Django REST Framework |
+| Database | PostgreSQL 16 |
+| Documents | pypdfium2 (Apache-2.0), Pillow |
+| Deployment | Docker Compose, Caddy, Ubuntu, Tailscale |
 
-Celery and Redis are deliberately **not** part of the initial build. They get introduced only when an asynchronous workload actually justifies them (large Drive syncs, thumbnail generation at scale, OCR, AI indexing).
+No Redis and no Celery. Background work — ZIP extraction, probing, cover
+rendering — runs in a worker that claims jobs with a PostgreSQL advisory lock,
+which the PRD (§36) asks for until an async workload actually justifies more.
 
----
+## Security
 
-## Architecture
+- One origin for app and API, so no CORS and a `SameSite=Lax` session cookie.
+- Sessions are HttpOnly; no token is ever handed to JavaScript.
+- CSRF is enforced on every unsafe method **including anonymous ones** — DRF
+  exempts APIViews by default, which leaves login open to CSRF.
+- Authentication is rate-limited per address *and* per targeted account.
+- Authorization is decided server-side by one function and covered by a
+  permission matrix. An admin gets no extra read access through the app.
+- Uploads are sniffed for `%PDF-` rather than trusted by extension, and archives
+  are validated entry by entry before anything is written.
+- Credentials are redacted from logs by a filter rather than by convention.
 
-```text
-       Desktop / Tablet / Mobile
-                 |
-             Tailscale
-                 |
-          ┌──────┴──────┐
-          │    Caddy    │   one origin: /api → Django, everything else → Nuxt
-          └──┬───────┬──┘
-             │       │
-        ┌────┴───┐ ┌─┴──────────────┐
-        │ Nuxt 3 │ │ Django + DRF   │
-        │ PDF.js │ │ auth, authz,   │
-        └────────┘ │ uploads, ZIP   │
-                   │ import, PDF    │
-                   │ delivery       │
-                   └──┬──────────┬──┘
-                      │          │
-              ┌───────┴──┐   ┌───┴──────────────┐
-              │PostgreSQL│   │ library/  (PDFs) │  canonical — back this up
-              └──────────┘   │ thumbnails/      │  regenerable
-                      ▲      │ staging/         │  scratch
-                      │      └──────────────────┘
-              ┌───────┴────────┐
-              │ ingest worker  │  extracts ZIPs, probes PDFs, renders covers
-              └────────────────┘
-```
+## Documentation
 
-Every PDF byte a reader receives passes through Django's authorization boundary, and the storage directory is never served as static content.
-
----
-
-## Repository layout
-
-Built (✅) and planned (·):
-
-```text
-backend/
-├── config/                  ✅ Django settings, URLs, WSGI/ASGI
-├── common/                  ✅ structured logging + credential redaction,
-│                               encrypted model fields
-├── accounts/                ✅ custom user, session auth, admin
-├── api/                     ✅ DRF routing, health probes, OpenAPI
-├── integrations/
-│   └── google_drive/        ·  OAuth, connections, folder selection, sync
-├── library/                 ·  books, book sources, collections, metadata
-├── reader/                  ·  progress, bookmarks, highlights, notes, prefs
-└── sharing/                 ·  visibility, shared library, access rules
-
-frontend/                    ✅ Nuxt 3 — auth, CSRF, SSR cookie forwarding
-caddy/                       ✅ reverse proxy (single origin for app + API)
-deploy/                      ✅ bootstrap.sh, deploy.sh
-docs/                        ✅ deployment, Google OAuth
-```
-
-Django apps should stay loosely coupled.
-
----
-
-## Domain model
-
-The key design decision is separating a **logical book** from its **storage source**:
-
-```text
-Book ──> BookSource ──> local storage
-                        (later: a replaced file, or another provider)
-```
-
-This lets the bytes behind a book change — a better scan, a different provider — without touching its annotations.
-
-Storage is **content-addressed**: a file's SHA-256 is both its identity and its path. Uploading the same PDF twice stores one copy, so retrying a half-finished ZIP import costs no extra disk; a blob is deleted only once no book references it.
-
-Folders are a plain tree, owned by the user, with the invariants enforced in the model: no cycles, a depth cap, and unique names per parent.
-
-Deletion is a **trash**. An uploaded PDF may be the only copy its owner has, so deleting is reversible and permanent deletion is a separate, explicit step.
-
-Principal entities: `User` (custom model, email as login identifier), `Folder`, `Book`, `BookSource`, `UploadBatch`. Still to come: `ReadingProgress`, `Bookmark`, `Highlight`, `UserSettings`.
-
----
-
-## API surface
-
-REST via DRF, with an OpenAPI schema and browsable docs in development.
-
-```text
-GET    /api/library/folders/            POST   /api/library/upload/
-POST   /api/library/folders/            GET    /api/library/uploads/
-PATCH  /api/library/folders/{id}/       GET    /api/library/uploads/{id}/
-DELETE /api/library/folders/{id}/       GET    /api/library/trash/
-POST   /api/library/folders/{id}/restore/
-                                        GET    /api/library/storage/
-GET    /api/library/books/
-PATCH  /api/library/books/{id}/         GET    /api/library/books/{id}/content
-DELETE /api/library/books/{id}/         GET    /api/library/books/{id}/thumbnail
-POST   /api/library/books/{id}/restore/
-```
-
-`?permanent=true` on a delete empties it from the trash for good; without it, the item is recoverable.
-
-Object-level permissions apply to API endpoints, PDF streaming, cache access, thumbnails, modifications, and sharing actions alike.
-
----
-
-## Security model
-
-- HttpOnly, secure, correctly-`SameSite`d session cookies; CSRF protection. Auth tokens are not kept in `localStorage`.
-- Uploaded archives are treated as hostile: zip-slip paths, symlink entries, compression bombs, and entries lying about their size are all rejected before anything is written.
-- Uploads are sniffed for `%PDF-` rather than trusted by extension or content type.
-- Authentication is rate-limited per address **and** per targeted account.
-- `DEBUG=False`, restrictive `ALLOWED_HOSTS`, correct trusted origins, non-root containers, secrets via environment/Docker secrets.
-- Failure modes (revoked OAuth, deleted or moved Drive files, Drive API outages, corrupt or encrypted PDFs) must never silently destroy a user's reading state or annotations. Unavailable sources get marked, not deleted.
-
----
-
-## Deployment
-
-Docker Compose on Ubuntu, initially three services — `frontend`, `backend`, `postgres` — with persistent volumes for `postgres-data`, `pdf-cache`, and `thumbnails`. Access is expected to go through Tailscale; no public internet exposure is required beyond outbound access for Google APIs and OAuth.
-
-`compose.yaml`, `.env.example`, migrations, health checks, restart policies,
-and the setup/upgrade/backup procedures all ship in this repo — see
-[docs/deployment.md](docs/deployment.md).
-
-Nothing is published past `127.0.0.1`: `tailscale serve` terminates TLS for the
-MagicDNS name and forwards to Caddy on loopback, so the app has a real
-certificate (and therefore working `Secure` cookies) without exposing a port to
-the LAN or the internet.
-
-**Backups:** PostgreSQL holds the irreplaceable data (users, library metadata, collections, sharing, progress, bookmarks, highlights, notes, settings). The PDF cache and thumbnails are regenerable and do not need routine backup.
-
----
-
-## Roadmap
-
-| Phase | Scope |
-| --- | --- |
-| 1 — Platform foundation ✅ | Docker Compose, PostgreSQL, Django + DRF, custom User model, Nuxt, authentication, Django Admin, Tailscale deployment |
-| [2 — Uploads & folders](docs/phases/02-uploads.md) ✅ | PDF and ZIP upload, content-addressed storage, folder tree with rename/move/trash, ingest worker, thumbnails |
-| [3 — Library](docs/phases/03-library.md) | Grid/list views, imported Drive hierarchy, search, sort, filters, nested collections, Favourites, Continue Reading, Unsorted |
-| [4 — PDF reader](docs/phases/04-reader.md) | PDF.js, navigation, continuous/single-page modes, zoom, in-document search, table of contents, page thumbnails, preferences, progress sync |
-| [5 — Reading data](docs/phases/05-reading-data.md) | Bookmarks, highlights, notes |
-| [6 — Sharing](docs/phases/06-sharing.md) | Private/shared visibility, Shared Library, non-Google reader access, authorized PDF streaming, per-user state on shared books |
-| [7 — Hardening](docs/phases/07-hardening.md) | Security review, object-level permission tests, OAuth failure handling, resync/recovery, cache limits, large-PDF testing, backup/restore testing, mobile and tablet UX |
-
-Each phase is scoped in [docs/phases/](docs/phases/), including the six
-decisions that outlive their phase and should be settled early.
-
-The MVP is judged against the 31 success criteria in [§45 of the PRD](lumaindex-prd.md).
-
----
-
-## Non-goals for the MVP
-
-EPUB, MOBI/AZW, DRM, OCR, AI features, semantic/vector search, audiobooks, anonymous or public reading, open public registration, complex sharing ACLs, groups, PDF editing, and native mobile apps.
-
-Several of these — PWA offline reading, OCR, EPUB, tags, ratings, reading statistics, annotation export, AI Q&A and semantic search over pgvector — are listed as plausible future work in [§43 of the PRD](lumaindex-prd.md). The architecture should leave room for them without being built for them now.
+- [docs/deployment.md](docs/deployment.md) — deploying, backups, the restore
+  drill, troubleshooting
+- [docs/phases/](docs/phases/) — the design record for each phase, including the
+  six decisions that were expensive to reverse and how each was settled
+- [lumaindex-prd.md](lumaindex-prd.md) — the original specification

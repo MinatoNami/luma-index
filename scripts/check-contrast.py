@@ -1,8 +1,8 @@
-"""Check the palette in tokens.css against WCAG AA.
+"""Check the palette in frontend/assets/css/tokens.css against WCAG AA.
 
 Run it after changing a colour:
 
-    python3 frontend/assets/css/contrast-check.py
+    python3 scripts/check-contrast.py
 
 Body and secondary text need 4.5:1; the strong border needs 3:1 because input
 outlines are non-text UI components (WCAG 1.4.11). Exits non-zero on a failure
