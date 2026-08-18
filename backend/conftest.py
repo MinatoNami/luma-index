@@ -3,24 +3,46 @@
 from __future__ import annotations
 
 import pytest
-from cryptography.fernet import Fernet
-
-# Generated per run rather than hard-coded, so nothing in the repo looks like a
-# real key and nothing depends on a particular one.
-TEST_ENCRYPTION_KEY = Fernet.generate_key().decode()
 
 
 @pytest.fixture(autouse=True)
-def encryption_key(settings):
-    """Give every test a working field-encryption key.
+def isolated_storage(settings, tmp_path):
+    """Point library storage at a per-test directory.
 
-    Without this, any test touching an EncryptedTextField fails on
-    configuration rather than on the behaviour it is checking.
+    Without this, tests would write into the configured library directory —
+    which in a container is the real one — and leak files between runs.
     """
-    from common.encryption import _cipher
+    settings.LIBRARY_DIR = tmp_path / "library"
+    settings.THUMBNAIL_DIR = tmp_path / "thumbnails"
+    settings.UPLOAD_STAGING_DIR = tmp_path / "staging"
+    for path in (settings.LIBRARY_DIR, settings.THUMBNAIL_DIR, settings.UPLOAD_STAGING_DIR):
+        path.mkdir(parents=True, exist_ok=True)
+    return settings
 
-    settings.FIELD_ENCRYPTION_KEY = TEST_ENCRYPTION_KEY
-    settings.FIELD_ENCRYPTION_KEYS_LEGACY = []
-    _cipher.cache_clear()
-    yield
-    _cipher.cache_clear()
+
+@pytest.fixture
+def user(db, django_user_model):
+    return django_user_model.objects.create_user(
+        email="owner@example.com", password="a-long-enough-password-42",
+    )
+
+
+@pytest.fixture
+def other_user(db, django_user_model):
+    return django_user_model.objects.create_user(
+        email="mallory@example.com", password="a-long-enough-password-42",
+    )
+
+
+@pytest.fixture
+def api(user):
+    """A signed-in client with a CSRF token ready."""
+    from django.test import Client
+    from django.urls import reverse
+
+    client = Client()
+    client.force_login(user)
+    client.get(reverse("accounts:csrf"))
+    client.csrf = client.cookies["lumaindex_csrftoken"].value
+    client.headers = {"x-csrftoken": client.csrf}
+    return client

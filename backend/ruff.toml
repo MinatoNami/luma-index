@@ -13,3 +13,5 @@ ignore = [
 # S105 flags every literal used as a test password or a redaction fixture.
 "**/test_*.py" = ["S105", "S106"]
 "**/tests_*.py" = ["S105", "S106"]
+# conftest builds test users; the literals are fixtures, not credentials.
+"conftest.py" = ["S105", "S106"]

@@ -80,7 +80,6 @@ INSTALLED_APPS = [
     "accounts",
     "api",
     "library",
-    "integrations.google_drive",
 ]
 
 MIDDLEWARE = [
@@ -279,11 +278,20 @@ DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", "lumaindex@localhost")
 # Storage
 # --------------------------------------------------------------------------- #
 
-PDF_CACHE_DIR = Path(env("LUMA_PDF_CACHE_DIR", str(BASE_DIR / "data" / "pdf-cache")))
+# Uploaded PDFs. This is canonical storage, not a cache: nothing here can be
+# regenerated from anywhere else, so it must be backed up and it must never be
+# evicted to free space.
+LIBRARY_DIR = Path(env("LUMA_LIBRARY_DIR", str(BASE_DIR / "data" / "library")))
 THUMBNAIL_DIR = Path(env("LUMA_THUMBNAIL_DIR", str(BASE_DIR / "data" / "thumbnails")))
-PDF_CACHE_MAX_BYTES = env_int("LUMA_PDF_CACHE_MAX_BYTES", 10 * 1024**3)
+# Where an upload lands while it is being validated or a ZIP awaits extraction.
+UPLOAD_STAGING_DIR = Path(env("LUMA_UPLOAD_STAGING_DIR", str(BASE_DIR / "data" / "staging")))
 
-# Admin static files only. Never point this at PDF_CACHE_DIR — cached PDFs must
+MAX_UPLOAD_BYTES = env_int("LUMA_MAX_UPLOAD_BYTES", 2 * 1024**3)
+# Refuse an upload that would leave less than this much disk free. Storage is
+# canonical, so a full disk is not self-correcting the way a full cache is.
+MIN_FREE_DISK_BYTES = env_int("LUMA_MIN_FREE_DISK_BYTES", 2 * 1024**3)
+
+# Admin static files only. Never point this at LIBRARY_DIR — stored PDFs must
 # be served through the authorization boundary, never as static content.
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
@@ -291,35 +299,6 @@ STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
 }
-
-
-# --------------------------------------------------------------------------- #
-# Encryption of provider credentials
-# --------------------------------------------------------------------------- #
-
-FIELD_ENCRYPTION_KEY = env("LUMA_FIELD_ENCRYPTION_KEY")
-FIELD_ENCRYPTION_KEYS_LEGACY = env_list("LUMA_FIELD_ENCRYPTION_KEYS_LEGACY")
-
-
-# --------------------------------------------------------------------------- #
-# Google OAuth / Drive
-# --------------------------------------------------------------------------- #
-
-GOOGLE_OAUTH_CLIENT_ID = env("GOOGLE_OAUTH_CLIENT_ID")
-GOOGLE_OAUTH_CLIENT_SECRET = env("GOOGLE_OAUTH_CLIENT_SECRET")
-GOOGLE_OAUTH_REDIRECT_URI = env(
-    "GOOGLE_OAUTH_REDIRECT_URI",
-    f"{PUBLIC_ORIGIN.rstrip('/')}/api/drive/oauth/callback",
-)
-
-# A decision, not a default — see docs/google-oauth.md. drive.readonly is a
-# restricted scope with verification consequences.
-GOOGLE_DRIVE_SCOPES = env_list(
-    "GOOGLE_DRIVE_SCOPES",
-    "https://www.googleapis.com/auth/drive.readonly",
-) + ["openid", "email"]
-
-GOOGLE_DRIVE_CONFIGURED = bool(GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET)
 
 
 # --------------------------------------------------------------------------- #

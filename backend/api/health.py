@@ -54,8 +54,9 @@ class ReadinessView(APIView):
             checks["database"] = "error"
             logger.error("database health check failed", exc_info=exc)
 
-        for label, path in (("pdf_cache", settings.PDF_CACHE_DIR),
-                            ("thumbnails", settings.THUMBNAIL_DIR)):
+        for label, path in (("library", settings.LIBRARY_DIR),
+                            ("thumbnails", settings.THUMBNAIL_DIR),
+                            ("staging", settings.UPLOAD_STAGING_DIR)):
             try:
                 path.mkdir(parents=True, exist_ok=True)
                 if not os.access(path, os.W_OK):

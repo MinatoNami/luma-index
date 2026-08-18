@@ -58,12 +58,6 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
-      LUMA_FIELD_ENCRYPTION_KEY: ${LUMA_FIELD_ENCRYPTION_KEY:-}
-      LUMA_FIELD_ENCRYPTION_KEYS_LEGACY: ${LUMA_FIELD_ENCRYPTION_KEYS_LEGACY:-}
-      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
-      GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
-      GOOGLE_OAUTH_REDIRECT_URI: ${GOOGLE_OAUTH_REDIRECT_URI:-}
-      GOOGLE_DRIVE_SCOPES: ${GOOGLE_DRIVE_SCOPES:-}
       LUMA_EMAIL_BACKEND: ${LUMA_EMAIL_BACKEND:-console}
       EMAIL_HOST: ${EMAIL_HOST:-}
       EMAIL_PORT: ${EMAIL_PORT:-587}
@@ -71,26 +65,29 @@ services:
       EMAIL_HOST_PASSWORD: ${EMAIL_HOST_PASSWORD:-}
       EMAIL_USE_TLS: ${EMAIL_USE_TLS:-True}
       DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-lumaindex@localhost}
-      LUMA_PDF_CACHE_DIR: /data/pdf-cache
+      LUMA_LIBRARY_DIR: /data/library
       LUMA_THUMBNAIL_DIR: /data/thumbnails
-      LUMA_PDF_CACHE_MAX_BYTES: ${LUMA_PDF_CACHE_MAX_BYTES:-10737418240}
+      LUMA_UPLOAD_STAGING_DIR: /data/staging
+      LUMA_MAX_UPLOAD_BYTES: ${LUMA_MAX_UPLOAD_BYTES:-2147483648}
+      LUMA_MIN_FREE_DISK_BYTES: ${LUMA_MIN_FREE_DISK_BYTES:-2147483648}
       GUNICORN_WORKERS: ${GUNICORN_WORKERS:-3}
       GUNICORN_TIMEOUT: ${GUNICORN_TIMEOUT:-120}
       DJANGO_SUPERUSER_EMAIL: ${DJANGO_SUPERUSER_EMAIL:-}
       DJANGO_SUPERUSER_PASSWORD: ${DJANGO_SUPERUSER_PASSWORD:-}
     volumes:
-      - pdf-cache:/data/pdf-cache
+      - library:/data/library
       - thumbnails:/data/thumbnails
+      - staging:/data/staging
     expose:
       - "8000"
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "5" }
 
-  # Drive syncing runs here rather than inside a request: a first import of a
-  # large library takes minutes and would exceed the request timeout. A loop
-  # claiming work with a Postgres advisory lock keeps Redis and Celery out of
-  # the stack until an async workload actually justifies them (PRD §36).
+  # Upload ingestion runs here rather than inside a request: extracting a ZIP
+  # of a few hundred books, probing each one, and rendering thumbnails takes
+  # minutes. A loop claiming work with a Postgres advisory lock keeps Redis and
+  # Celery out of the stack until an async workload justifies them (PRD §36).
   worker:
     build:
       context: ./backend
@@ -100,16 +97,17 @@ services:
       backend:
         condition: service_healthy
     environment: *backend-env
-    entrypoint: ["python", "manage.py", "run_sync_worker"]
+    entrypoint: ["python", "manage.py", "run_ingest_worker"]
     volumes:
-      - pdf-cache:/data/pdf-cache
+      - library:/data/library
       - thumbnails:/data/thumbnails
+      - staging:/data/staging
     # The image's healthcheck curls the API, which this container does not
     # serve. Watch the loop's heartbeat instead, so a worker wedged on a hung
     # call is restarted rather than passing because the process still exists.
     healthcheck:
       test: ["CMD", "python", "-c",
-             "import os,sys,time; p='/tmp/lumaindex-sync-worker.heartbeat'; sys.exit(0 if os.path.exists(p) and time.time()-os.path.getmtime(p) < 180 else 1)"]
+             "import os,sys,time; p='/tmp/lumaindex-ingest-worker.heartbeat'; sys.exit(0 if os.path.exists(p) and time.time()-os.path.getmtime(p) < 180 else 1)"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -165,7 +163,11 @@ services:
 
 volumes:
   postgres-data:
-  pdf-cache:
+  # Canonical, irreplaceable: back this up.
+  library:
+  # Regenerable from library/.
   thumbnails:
+  # Transient upload scratch.
+  staging:
   caddy-data:
   caddy-config:
