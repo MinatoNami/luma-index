@@ -267,6 +267,53 @@ class BookSource(models.Model):
         return self.availability_status == self.Availability.AVAILABLE
 
 
+class ReadingProgress(models.Model):
+    """Where a reader is in a book.
+
+    Per-user and private (PRD §19): sharing a book shares the file, never the
+    place someone had got to.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="reading_progress"
+    )
+    book = models.ForeignKey(Book, on_delete=models.CASCADE, related_name="progress_records")
+
+    page = models.PositiveIntegerField(default=0)  # 0-indexed
+    # How far through that page, rather than a pixel offset. A pixel offset
+    # means nothing at a different zoom or on a different screen, which is
+    # exactly what §21's cross-device resume has to survive.
+    page_fraction = models.FloatField(default=0.0)
+    # Denormalised for library cards, and computed on the server so two clients
+    # cannot disagree about it.
+    percentage = models.FloatField(default=0.0)
+
+    last_opened_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+    # The client's own clock at the moment it recorded this position. Used only
+    # to reject a stale write — see the progress endpoint.
+    client_updated_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["user", "book"], name="unique_progress_per_reader")
+        ]
+        indexes = [
+            models.Index(fields=["user", "-last_opened_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.user} @ {self.percentage:.0f}% of {self.book}"
+
+    @property
+    def is_finished(self) -> bool:
+        return self.percentage >= 99.5
+
+    @property
+    def is_started(self) -> bool:
+        return 0 < self.percentage < 99.5
+
+
 class UploadBatch(models.Model):
     """One upload the worker has to chew through.
 

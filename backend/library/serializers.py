@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from rest_framework import serializers
 
-from .models import Book, BookSource, Folder, UploadBatch
+from .models import Book, BookSource, Folder, ReadingProgress, UploadBatch
 
 
 class FolderSerializer(serializers.ModelSerializer):
@@ -65,17 +65,47 @@ class BookSourceSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class ReadingProgressSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ReadingProgress
+        fields = ("page", "page_fraction", "percentage", "last_opened_at",
+                  "updated_at", "client_updated_at")
+        read_only_fields = ("percentage", "last_opened_at", "updated_at")
+
+
+class ProgressWriteSerializer(serializers.Serializer):
+    page = serializers.IntegerField(min_value=0)
+    page_fraction = serializers.FloatField(min_value=0.0, max_value=1.0, default=0.0)
+    # Optional. When present it is compared against the stored value to drop a
+    # write that was recorded earlier than what the server already has.
+    client_updated_at = serializers.DateTimeField(required=False, allow_null=True)
+
+
 class BookSerializer(serializers.ModelSerializer):
     source = BookSourceSerializer(read_only=True)
     path = serializers.CharField(read_only=True)
+    progress = serializers.SerializerMethodField()
 
     class Meta:
         model = Book
         fields = ("id", "title", "folder", "path", "page_count", "has_text_layer",
-                  "visibility", "thumbnail_path", "source", "deleted_at",
+                  "visibility", "thumbnail_path", "source", "progress", "deleted_at",
                   "created_at", "updated_at")
         read_only_fields = ("id", "path", "page_count", "has_text_layer", "thumbnail_path",
-                            "source", "deleted_at", "created_at", "updated_at")
+                            "source", "progress", "deleted_at", "created_at", "updated_at")
+
+    def get_progress(self, obj):
+        """Attached by the list view's prefetch; None when never opened."""
+        records = getattr(obj, "_reader_progress", None)
+        if not records:
+            return None
+        record = records[0]
+        return {
+            "page": record.page,
+            "page_fraction": record.page_fraction,
+            "percentage": record.percentage,
+            "last_opened_at": record.last_opened_at,
+        }
 
     def validate_title(self, value: str) -> str:
         title = value.strip()

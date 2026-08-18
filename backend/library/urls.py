@@ -16,6 +16,10 @@ urlpatterns = [
     path("books/<int:book_id>/content", views.BookContentView.as_view(), name="book-content"),
     path("books/<int:book_id>/thumbnail", views.BookThumbnailView.as_view(),
          name="book-thumbnail"),
+    path("books/<int:book_id>/outline", views.BookOutlineView.as_view(), name="book-outline"),
+    path("books/<int:book_id>/progress", views.BookProgressView.as_view(),
+         name="book-progress"),
+    path("continue-reading/", views.ContinueReadingView.as_view(), name="continue-reading"),
 
     path("upload/", views.UploadView.as_view(), name="upload"),
     path("uploads/", views.UploadBatchListView.as_view(), name="upload-batches"),

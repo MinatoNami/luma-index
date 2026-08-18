@@ -12,8 +12,9 @@ from pathlib import Path
 
 from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.http import FileResponse, Http404
+from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_protect
 from drf_spectacular.utils import OpenApiResponse, extend_schema
@@ -23,9 +24,16 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Book, Folder, UploadBatch
+from .models import Book, Folder, ReadingProgress, UploadBatch
+from .outline import outline_for
 from .ranges import serve_file
-from .serializers import BookSerializer, FolderSerializer, UploadBatchSerializer
+from .serializers import (
+    BookSerializer,
+    FolderSerializer,
+    ProgressWriteSerializer,
+    ReadingProgressSerializer,
+    UploadBatchSerializer,
+)
 from .services import IngestError, store_upload
 from .storage import InsufficientSpace, LibraryStorage
 
@@ -41,7 +49,19 @@ class OwnedMixin:
         return Folder.objects.filter(owner=self.request.user)
 
     def books(self):
-        return Book.objects.filter(owner=self.request.user).select_related("source", "folder")
+        from django.db.models import Prefetch
+
+        # Prefetched rather than fetched per card: a folder of 200 books would
+        # otherwise be 200 extra queries.
+        return (
+            Book.objects.filter(owner=self.request.user)
+            .select_related("source", "folder")
+            .prefetch_related(Prefetch(
+                "progress_records",
+                queryset=ReadingProgress.objects.filter(user=self.request.user),
+                to_attr="_reader_progress",
+            ))
+        )
 
     def get_folder(self, folder_id: int, *, live_only: bool = True) -> Folder:
         queryset = self.folders()
@@ -444,3 +464,101 @@ class StorageStatusView(OwnedMixin, APIView):
             "min_free_disk_bytes": settings.MIN_FREE_DISK_BYTES,
             "book_count": self.books().live().count(),
         })
+
+
+class BookOutlineView(OwnedMixin, APIView):
+    """The PDF's table of contents, where it has one (PRD §20)."""
+
+    @extend_schema(summary="Book outline", responses={200: OpenApiResponse()})
+    def get(self, request, book_id: int):
+        book = self.get_book(book_id)
+        source = getattr(book, "source", None)
+        if source is None:
+            raise Http404
+
+        path = LibraryStorage().path_for(source.storage_key)
+        if not path.exists():
+            return Response({"items": []})
+        return Response({"items": outline_for(path, source.storage_key)})
+
+
+@csrf_required
+class BookProgressView(OwnedMixin, APIView):
+    """Where this reader is in this book.
+
+    Progress is per-user (PRD §19) and there is no id but the caller's, so a
+    reader can only ever read or write their own.
+    """
+
+    @extend_schema(summary="Reading progress", responses={200: ReadingProgressSerializer})
+    def get(self, request, book_id: int):
+        book = self.get_book(book_id)
+        record = ReadingProgress.objects.filter(user=request.user, book=book).first()
+        if record is None:
+            return Response({"page": 0, "page_fraction": 0.0, "percentage": 0.0,
+                             "last_opened_at": None, "updated_at": None,
+                             "client_updated_at": None})
+        return Response(ReadingProgressSerializer(record).data)
+
+    @extend_schema(summary="Record reading progress", request=ProgressWriteSerializer,
+                   responses={200: ReadingProgressSerializer})
+    def put(self, request, book_id: int):
+        book = self.get_book(book_id)
+        serializer = ProgressWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        with transaction.atomic():
+            record, _ = ReadingProgress.objects.select_for_update().get_or_create(
+                user=request.user, book=book,
+            )
+
+            incoming = data.get("client_updated_at")
+            # The rule PRD §19 and §21 leave undefined. A device that was
+            # backgrounded mid-book can flush its position long afterwards; if
+            # that write is older than what the server already has, honouring it
+            # would rewind a reader who has since moved on. Writes without a
+            # client timestamp fall back to last-write-wins.
+            if (incoming and record.client_updated_at
+                    and incoming < record.client_updated_at):
+                logger.info("ignored a stale progress write",
+                            extra={"event": "reader.progress.stale", "book_id": book.pk})
+                return Response(ReadingProgressSerializer(record).data)
+
+            page = min(data["page"], max(0, (book.page_count or 1) - 1))
+            record.page = page
+            record.page_fraction = data["page_fraction"]
+            record.percentage = self._percentage(page, data["page_fraction"], book.page_count)
+            record.last_opened_at = timezone.now()
+            record.client_updated_at = incoming
+            record.save()
+
+        return Response(ReadingProgressSerializer(record).data)
+
+    @staticmethod
+    def _percentage(page: int, fraction: float, page_count: int | None) -> float:
+        if not page_count:
+            return 0.0
+        # Position of the reading point through the whole document, so a reader
+        # halfway down the last page reads as ~100%, not (n-1)/n.
+        return round(min(100.0, ((page + fraction) / page_count) * 100), 2)
+
+
+class ContinueReadingView(OwnedMixin, APIView):
+    """Books started but not finished, most recently opened first (PRD §12)."""
+
+    @extend_schema(summary="Continue reading", responses={200: BookSerializer(many=True)})
+    def get(self, request):
+        records = (
+            ReadingProgress.objects
+            .filter(user=request.user, book__deleted_at__isnull=True,
+                    percentage__gt=0, percentage__lt=99.5)
+            .select_related("book", "book__source", "book__folder")
+            .order_by("-last_opened_at")[:24]
+        )
+        books = []
+        for record in records:
+            book = record.book
+            book._reader_progress = [record]
+            books.append(book)
+        return Response(BookSerializer(books, many=True, context={"request": request}).data)
