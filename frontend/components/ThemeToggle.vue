@@ -1,41 +1,37 @@
 <script setup lang="ts">
+import { applyTheme, type Theme } from '~/composables/useSettings'
+
 /**
- * Light / dark / follow-system.
+ * Cycles light → dark → follow-system.
  *
- * Persisted in localStorage for now. PRD §24 wants this on UserSettings so it
- * follows a reader between devices; that arrives with the reader preferences.
+ * Applies immediately and saves to the account in the background, so the choice
+ * follows the user to their other devices (PRD §24). A failed save is not worth
+ * interrupting anyone over — the setting still applies here.
  */
-type Theme = 'light' | 'dark' | 'system'
+const { settings, saveSettings } = useSettings()
 
-const theme = useState<Theme>('theme', () => 'system')
+const theme = computed<Theme>(() => settings.value?.theme ?? 'system')
 
-function apply(value: Theme) {
-  if (!import.meta.client) return
-  const root = document.documentElement
-  if (value === 'system') root.removeAttribute('data-theme')
-  else root.setAttribute('data-theme', value)
-  localStorage.setItem('lumaindex-theme', value)
-}
-
-onMounted(() => {
-  const stored = localStorage.getItem('lumaindex-theme') as Theme | null
-  if (stored) theme.value = stored
-  apply(theme.value)
-})
-
-function cycle() {
-  theme.value = theme.value === 'system' ? 'light' : theme.value === 'light' ? 'dark' : 'system'
-  apply(theme.value)
-}
-
-const label = computed(() => ({
+const LABELS: Record<Theme, string> = {
   system: 'Theme: follows your system',
   light: 'Theme: light',
   dark: 'Theme: dark',
-}[theme.value]))
+}
+
+async function cycle() {
+  const next: Theme = theme.value === 'system' ? 'light' : theme.value === 'light' ? 'dark' : 'system'
+  applyTheme(next)
+  if (settings.value) settings.value = { ...settings.value, theme: next }
+  try {
+    await saveSettings({ theme: next })
+  } catch {
+    // Applied locally regardless.
+  }
+}
 </script>
 
 <template>
-  <AppButton variant="ghost" size="sm" icon-only :icon="theme === 'dark' ? 'moon' : 'sun'"
-             :title="label" :aria-label="label" @click="cycle" />
+  <AppButton variant="ghost" size="sm" icon-only
+             :icon="theme === 'dark' ? 'moon' : 'sun'"
+             :title="LABELS[theme]" :aria-label="LABELS[theme]" @click="cycle" />
 </template>

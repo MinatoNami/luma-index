@@ -19,4 +19,23 @@ export default defineNuxtRouteMiddleware(async (to) => {
   if (user.value && PUBLIC_EXACT.has(to.path)) {
     return navigateTo('/')
   }
+
+  // Preferences live on the account (PRD §24) and are fetched here so app.vue
+  // can stamp the theme into the server-rendered HTML. Applying it only after
+  // hydration would flash a white screen at a dark-mode reader on every load.
+  if (user.value) {
+    const { settings, loadSettings } = useSettings()
+    if (settings.value === null) {
+      try {
+        await loadSettings()
+      } catch {
+        // Never block navigation on a preference fetch.
+      }
+    }
+    if (settings.value && import.meta.client) {
+      // Seed the library's view state from the saved default.
+      useState<string>('library-view').value = settings.value.library_view
+      localStorage.setItem('lumaindex-view', settings.value.library_view)
+    }
+  }
 })

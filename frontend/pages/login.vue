@@ -26,7 +26,7 @@ async function onSubmit() {
   <main class="wrap">
     <form class="panel card" @submit.prevent="onSubmit">
       <div class="brand">
-        <span class="mark" aria-hidden="true" />
+        <AppLogo :size="24" />
         <h1>LumaIndex</h1>
       </div>
       <p class="sub">Your PDF library.</p>
@@ -62,8 +62,6 @@ async function onSubmit() {
         position: relative; }
 .card { width: min(23rem, 100%); padding: var(--space-6); }
 .brand { display: flex; align-items: center; gap: var(--space-3); }
-.mark { width: 24px; height: 24px; border-radius: 8px;
-        background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #fff)); }
 h1 { margin: 0; font-size: var(--text-xl); }
 .sub { margin: var(--space-2) 0 var(--space-5); color: var(--text-secondary); }
 .field { margin-bottom: var(--space-4); }

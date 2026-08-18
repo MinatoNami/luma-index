@@ -30,6 +30,14 @@ export default defineNuxtConfig({
         { charset: 'utf-8' },
         { name: 'viewport', content: 'width=device-width, initial-scale=1, viewport-fit=cover' },
         { name: 'color-scheme', content: 'light dark' },
+        { name: 'theme-color', content: '#4B4ACF' },
+      ],
+      link: [
+        // SVG first for anything modern; the PNGs cover Safari's touch icon and
+        // the contexts that still ask for a raster favicon.
+        { rel: 'icon', type: 'image/svg+xml', href: '/icon.svg' },
+        { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/favicon-32.png' },
+        { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' },
       ],
     },
   },

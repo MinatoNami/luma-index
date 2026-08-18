@@ -36,10 +36,8 @@ const dialog = ref<{
 const fileInput = ref<HTMLInputElement | null>(null)
 let dragDepth = 0
 
-onMounted(() => {
-  const stored = localStorage.getItem('lumaindex-view') as ViewMode | null
-  if (stored) view.value = stored
-})
+// The middleware seeds this from the account's saved preference. Changing it
+// here is a per-session override; Settings is where it is saved for good.
 watch(view, value => import.meta.client && localStorage.setItem('lumaindex-view', value))
 
 async function load({ quiet = false } = {}) {
@@ -236,13 +234,16 @@ const bookHref = (book: Book) => `/api/library/books/${book.id}/content`
        @dragleave.prevent="onDragLeave" @drop.prevent="onDrop">
     <header class="topbar">
       <div class="brand">
-        <span class="mark" aria-hidden="true" />
+        <AppLogo :size="24" />
         <strong>LumaIndex</strong>
       </div>
       <div class="account">
         <ThemeToggle />
         <NuxtLink class="quiet-link" to="/trash">
           <AppIcon name="trash" :size="16" /> Trash
+        </NuxtLink>
+        <NuxtLink class="quiet-link" to="/settings">
+          <AppIcon name="settings" :size="16" /> Settings
         </NuxtLink>
         <span class="who tertiary">{{ user?.display_name || user?.email }}</span>
         <AppButton variant="ghost" size="sm" @click="logout">Sign out</AppButton>
@@ -403,10 +404,6 @@ const bookHref = (book: Book) => `/api/library/books/${book.id}/content`
   position: sticky; top: 0; z-index: 20;
 }
 .brand { display: flex; align-items: center; gap: var(--space-3); font-size: var(--text-md); }
-.mark {
-  width: 22px; height: 22px; border-radius: 7px;
-  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #fff));
-}
 .account { display: flex; align-items: center; gap: var(--space-3); }
 .quiet-link {
   display: inline-flex; align-items: center; gap: var(--space-2);
