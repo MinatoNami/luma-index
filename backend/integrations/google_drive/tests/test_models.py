@@ -22,12 +22,8 @@ def connection(user):
 
 
 @pytest.mark.django_db
-def test_refresh_token_is_encrypted_in_the_database(connection, settings):
-    settings.FIELD_ENCRYPTION_KEY = "8Nn9Xq3vJ2mQ7pR4tW6yZ1aB5cD8eF0gH3iK6lM9nO4="
-    from common.encryption import _cipher
-
-    _cipher.cache_clear()
-
+def test_refresh_token_is_encrypted_in_the_database(connection):
+    """Reads the raw column: round-tripping through the ORM proves nothing."""
     connection.refresh_token = "1//0g-super-secret-refresh-token"
     connection.save(update_fields=["refresh_token"])
 
@@ -45,7 +41,6 @@ def test_refresh_token_is_encrypted_in_the_database(connection, settings):
     assert DriveConnection.objects.get(pk=connection.pk).refresh_token == (
         "1//0g-super-secret-refresh-token"
     )
-    _cipher.cache_clear()
 
 
 @pytest.mark.django_db

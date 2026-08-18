@@ -302,6 +302,27 @@ FIELD_ENCRYPTION_KEYS_LEGACY = env_list("LUMA_FIELD_ENCRYPTION_KEYS_LEGACY")
 
 
 # --------------------------------------------------------------------------- #
+# Google OAuth / Drive
+# --------------------------------------------------------------------------- #
+
+GOOGLE_OAUTH_CLIENT_ID = env("GOOGLE_OAUTH_CLIENT_ID")
+GOOGLE_OAUTH_CLIENT_SECRET = env("GOOGLE_OAUTH_CLIENT_SECRET")
+GOOGLE_OAUTH_REDIRECT_URI = env(
+    "GOOGLE_OAUTH_REDIRECT_URI",
+    f"{PUBLIC_ORIGIN.rstrip('/')}/api/drive/oauth/callback",
+)
+
+# A decision, not a default — see docs/google-oauth.md. drive.readonly is a
+# restricted scope with verification consequences.
+GOOGLE_DRIVE_SCOPES = env_list(
+    "GOOGLE_DRIVE_SCOPES",
+    "https://www.googleapis.com/auth/drive.readonly",
+) + ["openid", "email"]
+
+GOOGLE_DRIVE_CONFIGURED = bool(GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET)
+
+
+# --------------------------------------------------------------------------- #
 # I18N / TZ
 # --------------------------------------------------------------------------- #
 

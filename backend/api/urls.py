@@ -14,8 +14,9 @@ urlpatterns = [
     path("health/ready/", health.ReadinessView.as_view(), name="health-ready"),
 
     path("auth/", include("accounts.urls")),
+    path("drive/", include("integrations.google_drive.urls")),
 
-    # Phase 2+: /api/drive/, /api/library/, /api/books/, /api/collections/,
+    # Phase 3+: /api/library/, /api/books/, /api/collections/,
     #           /api/reader/, /api/shared/, /api/users/
 
     path("schema/", SpectacularAPIView.as_view(), name="schema"),
