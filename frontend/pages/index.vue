@@ -217,7 +217,8 @@ function folderActions(folder: Folder) {
 function bookActions(book: Book) {
   return [
     { label: 'Rename', icon: 'pencil', run: () => renameBook(book) },
-    { label: 'Open', icon: 'file',
+    { label: 'Open', icon: 'file', run: () => navigateTo(`/books/${book.id}`) },
+    { label: 'Download', icon: 'download',
       run: () => window.open(`/api/library/books/${book.id}/content`, '_blank') },
     ...(currentId.value !== null
       ? [{ label: 'Move up one level', icon: 'arrow-up', run: () => moveUp(book, 'book') }]
@@ -227,7 +228,7 @@ function bookActions(book: Book) {
 }
 
 const isEmpty = computed(() => !folders.value.length && !books.value.length)
-const bookHref = (book: Book) => `/api/library/books/${book.id}/content`
+const bookHref = (book: Book) => `/books/${book.id}`
 
 function itemLabel(folder: Folder): string {
   const count = folder.item_count ?? folder.book_count
@@ -342,13 +343,13 @@ function itemLabel(folder: Folder): string {
           <RowMenu :actions="folderActions(folder)" :label="`Actions for ${folder.name}`" />
         </div>
         <div v-for="book in books" :key="`b${book.id}`" class="row">
-          <a class="cell name" :href="bookHref(book)" target="_blank" rel="noopener">
+          <NuxtLink class="cell name" :to="bookHref(book)">
             <BookCover :book="book" size="sm" />
             <span class="label">{{ book.title }}</span>
             <span v-if="book.source?.availability_status !== 'available'" class="badge-warn">
               unavailable
             </span>
-          </a>
+          </NuxtLink>
           <span class="cell tertiary">{{ book.source ? formatBytes(book.source.file_size) : '—' }}</span>
           <span class="cell tertiary">{{ book.page_count ?? '…' }}</span>
           <RowMenu :actions="bookActions(book)" :label="`Actions for ${book.title}`" />
@@ -367,14 +368,14 @@ function itemLabel(folder: Folder): string {
                    :label="`Actions for ${folder.name}`" />
         </div>
         <div v-for="book in books" :key="`b${book.id}`" class="card panel">
-          <a class="card-open" :href="bookHref(book)" target="_blank" rel="noopener">
+          <NuxtLink class="card-open" :to="bookHref(book)">
             <BookCover :book="book" :size="view === 'large' ? 'lg' : 'md'" />
             <span class="card-title">{{ book.title }}</span>
             <span class="card-meta tertiary">
               {{ book.page_count ? `${book.page_count} pages` : 'Preparing…' }}
               <template v-if="book.source"> · {{ formatBytes(book.source.file_size) }}</template>
             </span>
-          </a>
+          </NuxtLink>
           <RowMenu class="card-menu" :actions="bookActions(book)"
                    :label="`Actions for ${book.title}`" />
         </div>

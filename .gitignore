@@ -21,6 +21,9 @@ htmlcov/
 .coverage
 *.sqlite3
 
+# Copied from node_modules during the frontend build
+frontend/public/cmaps/
+
 # Node / Nuxt
 node_modules/
 .nuxt/

@@ -10,6 +10,13 @@ COPY package.json package-lock.json* ./
 RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
 COPY . .
+
+# PDF.js needs its character maps to render CJK text; without them those pages
+# come out blank. They live in node_modules, so they are copied into the static
+# directory here rather than committed.
+RUN mkdir -p public/cmaps \
+ && cp -r node_modules/pdfjs-dist/cmaps/. public/cmaps/
+
 RUN npm run build
 
 # --- runtime ----------------------------------------------------------------
