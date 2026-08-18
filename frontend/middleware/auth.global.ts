@@ -32,10 +32,15 @@ export default defineNuxtRouteMiddleware(async (to) => {
         // Never block navigation on a preference fetch.
       }
     }
-    if (settings.value && import.meta.client) {
-      // Seed the library's view state from the saved default.
-      useState<string>('library-view').value = settings.value.library_view
-      localStorage.setItem('lumaindex-view', settings.value.library_view)
+    if (settings.value) {
+      // Seeded on the server as well as the client. If only the client knew the
+      // saved view, SSR would render the list branch and hydration would find
+      // the grid one — a mismatch on every single load.
+      const saved = settings.value.library_view
+      if (saved === 'list' || saved === 'grid' || saved === 'large') {
+        useState<string>('library-view').value = saved
+        if (import.meta.client) localStorage.setItem('lumaindex-view', saved)
+      }
     }
   }
 })

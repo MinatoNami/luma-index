@@ -24,6 +24,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import Book, Folder, UploadBatch
+from .ranges import serve_file
 from .serializers import BookSerializer, FolderSerializer, UploadBatchSerializer
 from .services import IngestError, store_upload
 from .storage import InsufficientSpace, LibraryStorage
@@ -250,13 +251,17 @@ class BookContentView(OwnedMixin, APIView):
     """Stream a stored PDF.
 
     Django authorizes before a byte moves, and the storage directory is never
-    exposed as static content (PRD §18, §25, §29). FileResponse handles Range
-    requests, which is what lets PDF.js open a large book without downloading
-    all of it first.
+    exposed as static content (PRD §18, §25, §29).
+
+    Byte ranges are honoured here rather than left to FileResponse, which
+    ignores them: PDF.js reads a PDF's trailer from the end of the file before
+    anything else, and without a 206 it downloads the whole book first.
     """
 
     @extend_schema(summary="Book contents (PDF)",
-                   responses={200: OpenApiResponse(description="application/pdf")})
+                   responses={200: OpenApiResponse(description="application/pdf"),
+                              206: OpenApiResponse(description="Partial content"),
+                              416: OpenApiResponse(description="Range not satisfiable")})
     def get(self, request, book_id: int):
         book = self.get_book(book_id)
         source = getattr(book, "source", None)
@@ -270,9 +275,16 @@ class BookContentView(OwnedMixin, APIView):
             return Response({"detail": "The stored file is missing."},
                             status=status.HTTP_410_GONE)
 
-        response = FileResponse(path.open("rb"), content_type="application/pdf")
-        response["Content-Disposition"] = f'inline; filename="{source.original_filename}"'
-        response["Accept-Ranges"] = "bytes"
+        response = serve_file(
+            path,
+            content_type="application/pdf",
+            filename=source.original_filename,
+            range_header=request.headers.get("Range", ""),
+        )
+        # X_FRAME_OPTIONS is DENY globally, which is right for the app but also
+        # blocks our own reader from embedding this. Relaxed to same-origin on
+        # this one response so the PDF can be displayed in place.
+        response["X-Frame-Options"] = "SAMEORIGIN"
         return response
 
 

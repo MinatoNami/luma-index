@@ -439,3 +439,41 @@ def test_a_batch_with_no_staged_file_fails_clearly(user):
     assert batch.status == UploadBatch.Status.FAILED
     assert "no longer on disk" in batch.error_summary
     assert "Is a directory" not in batch.error_summary
+
+
+@pytest.mark.django_db
+def test_a_folder_of_subfolders_does_not_report_zero_items(api, user):
+    """A ZIP's outermost folder holds only subfolders, so counting books alone
+    reported "0 items" for a folder full of books."""
+    outer = Folder.objects.create(owner=user, name="Ebooks")
+    for name in ("Fiction", "Reference"):
+        inner = Folder.objects.create(owner=user, name=name, parent=outer)
+        Book.objects.create(owner=user, title=f"{name} book", folder=inner)
+
+    body = api.get(reverse("library:folders"), {"parent": "root"}).json()[0]
+
+    assert body["folder_count"] == 2
+    assert body["book_count"] == 0
+    assert body["item_count"] == 2, "an outer folder still looks empty"
+
+
+@pytest.mark.django_db
+def test_item_count_includes_both_folders_and_books(api, user):
+    folder = Folder.objects.create(owner=user, name="Mixed")
+    Folder.objects.create(owner=user, name="Sub", parent=folder)
+    Book.objects.create(owner=user, title="Loose", folder=folder)
+
+    body = api.get(reverse("library:folders"), {"parent": "root"}).json()[0]
+    assert (body["folder_count"], body["book_count"], body["item_count"]) == (1, 1, 2)
+
+
+@pytest.mark.django_db
+def test_trashed_children_are_not_counted(api, user):
+    folder = Folder.objects.create(owner=user, name="Mixed")
+    doomed = Folder.objects.create(owner=user, name="Sub", parent=folder)
+    book = Book.objects.create(owner=user, title="Loose", folder=folder)
+    doomed.trash()
+    book.trash()
+
+    body = api.get(reverse("library:folders"), {"parent": "root"}).json()[0]
+    assert body["item_count"] == 0

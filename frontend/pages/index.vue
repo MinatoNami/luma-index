@@ -12,12 +12,7 @@ const currentId = computed(() => {
   return raw === undefined || raw === 'root' ? null : Number(raw)
 })
 
-const folders = ref<Folder[]>([])
-const books = ref<Book[]>([])
-const breadcrumbs = ref<Folder[]>([])
-const currentFolder = ref<Folder | null>(null)
 const search = ref('')
-const loading = ref(true)
 const busy = ref(false)
 const error = ref('')
 const notice = ref('')
@@ -40,39 +35,45 @@ let dragDepth = 0
 // here is a per-session override; Settings is where it is saved for good.
 watch(view, value => import.meta.client && localStorage.setItem('lumaindex-view', value))
 
-async function load({ quiet = false } = {}) {
-  if (!quiet) loading.value = true
-  error.value = ''
-  try {
+// Fetched during SSR, not in onMounted. Loading in onMounted meant the server
+// always rendered the skeleton — so every visit flashed placeholders before the
+// real content, and the Nuxt server was doing no useful work.
+const { data, pending, refresh: reload } = await useAsyncData(
+  'library-folder',
+  async () => {
     const [folderList, bookList] = await Promise.all([
       library.listFolders(currentId.value),
       library.listBooks(currentId.value, search.value ? { search: search.value } : {}),
     ])
-    folders.value = folderList
-    books.value = bookList
+    const detail = currentId.value === null
+      ? null
+      : await library.folderDetail(currentId.value)
+    return { folders: folderList, books: bookList, detail }
+  },
+  { watch: [currentId, search], default: () => ({ folders: [], books: [], detail: null }) },
+)
 
-    if (currentId.value === null) {
-      breadcrumbs.value = []
-      currentFolder.value = null
-    } else {
-      const detail = await library.folderDetail(currentId.value)
-      breadcrumbs.value = detail.ancestors
-      currentFolder.value = detail
-    }
+const folders = computed<Folder[]>(() => data.value?.folders ?? [])
+const books = computed<Book[]>(() => data.value?.books ?? [])
+const currentFolder = computed<Folder | null>(() => data.value?.detail ?? null)
+const breadcrumbs = computed<Folder[]>(() => data.value?.detail?.ancestors ?? [])
+// Only a first load shows placeholders; a background refresh must not blank the
+// screen the user is already reading.
+const loading = computed(() => pending.value && !data.value?.folders.length
+  && !data.value?.books.length)
+
+async function load(_options: { quiet?: boolean } = {}) {
+  error.value = ''
+  try {
+    await reload()
   } catch (err: any) {
     error.value = err?.data?.detail || 'Could not load this folder.'
-  } finally {
-    loading.value = false
   }
 }
 
-watch(() => route.query.folder, () => load())
-watch(search, () => load({ quiet: true }))
-onMounted(() => load())
-
 // Covers are rendered after upload, so poll briefly while any are missing.
 let coverTimer: ReturnType<typeof setTimeout> | null = null
-watch(books, list => {
+watch(books, (list) => {
   if (coverTimer) clearTimeout(coverTimer)
   if (list.some(b => !b.thumbnail_path)) {
     coverTimer = setTimeout(() => load({ quiet: true }), 2500)
@@ -225,8 +226,13 @@ function bookActions(book: Book) {
   ]
 }
 
-const isEmpty = computed(() => !loading.value && !folders.value.length && !books.value.length)
+const isEmpty = computed(() => !folders.value.length && !books.value.length)
 const bookHref = (book: Book) => `/api/library/books/${book.id}/content`
+
+function itemLabel(folder: Folder): string {
+  const count = folder.item_count ?? folder.book_count
+  return count === 0 ? 'Empty' : `${count} item${count === 1 ? '' : 's'}`
+}
 </script>
 
 <template>
@@ -303,8 +309,26 @@ const bookHref = (book: Book) => `/api/library/books/${book.id}/content`
         </li>
       </ul>
 
+      <!-- Skeleton, empty, or content — never two at once ------------- -->
+      <div v-if="loading" :class="['cards', view === 'list' ? 'grid' : view]">
+        <div v-for="n in 8" :key="n" class="card panel skeleton">
+          <div class="skeleton-cover" /><div class="skeleton-line" />
+        </div>
+      </div>
+
+      <EmptyState v-else-if="isEmpty"
+                  :icon="search ? 'search' : 'inbox'"
+                  :title="search ? 'Nothing matches that' : 'This folder is empty'"
+                  :description="search
+                    ? 'Try a different word, or clear the search.'
+                    : 'Drag PDFs here, or upload a ZIP — its folders are recreated as you had them.'">
+        <AppButton v-if="!search" variant="primary" icon="upload" @click="fileInput?.click()">
+          Upload files
+        </AppButton>
+      </EmptyState>
+
       <!-- List --------------------------------------------------------- -->
-      <div v-if="!isEmpty && view === 'list'" class="listing panel">
+      <div v-else-if="view === 'list'" class="listing panel">
         <div class="row head">
           <span>Name</span><span>Size</span><span>Pages</span><span />
         </div>
@@ -313,7 +337,7 @@ const bookHref = (book: Book) => `/api/library/books/${book.id}/content`
             <span class="folder-chip"><AppIcon name="folder" :size="17" /></span>
             <span class="label">{{ folder.name }}</span>
           </button>
-          <span class="cell tertiary">{{ folder.book_count }} item{{ folder.book_count === 1 ? '' : 's' }}</span>
+          <span class="cell tertiary">{{ itemLabel(folder) }}</span>
           <span class="cell" />
           <RowMenu :actions="folderActions(folder)" :label="`Actions for ${folder.name}`" />
         </div>
@@ -332,14 +356,12 @@ const bookHref = (book: Book) => `/api/library/books/${book.id}/content`
       </div>
 
       <!-- Grid and large icons ----------------------------------------- -->
-      <div v-else-if="!isEmpty" :class="['cards', view]">
+      <div v-else :class="['cards', view]">
         <div v-for="folder in folders" :key="`f${folder.id}`" class="card folder-card panel">
           <button class="card-open" type="button" @click="open(folder)">
             <span class="folder-art"><AppIcon name="folder" :size="view === 'large' ? 34 : 26" /></span>
             <span class="card-title">{{ folder.name }}</span>
-            <span class="card-meta tertiary">
-              {{ folder.book_count }} item{{ folder.book_count === 1 ? '' : 's' }}
-            </span>
+            <span class="card-meta tertiary">{{ itemLabel(folder) }}</span>
           </button>
           <RowMenu class="card-menu" :actions="folderActions(folder)"
                    :label="`Actions for ${folder.name}`" />
@@ -358,23 +380,6 @@ const bookHref = (book: Book) => `/api/library/books/${book.id}/content`
         </div>
       </div>
 
-      <!-- Skeleton and empty -------------------------------------------- -->
-      <div v-if="loading" :class="['cards', view === 'list' ? 'grid' : view]">
-        <div v-for="n in 4" :key="n" class="card panel skeleton">
-          <div class="skeleton-cover" /><div class="skeleton-line" />
-        </div>
-      </div>
-
-      <EmptyState v-else-if="isEmpty"
-                  :icon="search ? 'search' : 'inbox'"
-                  :title="search ? 'Nothing matches that' : 'This folder is empty'"
-                  :description="search
-                    ? 'Try a different word, or clear the search.'
-                    : 'Drag PDFs here, or upload a ZIP — its folders are recreated as you had them.'">
-        <AppButton v-if="!search" variant="primary" icon="upload" @click="fileInput?.click()">
-          Upload files
-        </AppButton>
-      </EmptyState>
     </main>
 
     <div v-if="dragging" class="dropzone" aria-hidden="true">
@@ -472,9 +477,18 @@ const bookHref = (book: Book) => `/api/library/books/${book.id}/content`
 }
 
 /* -- cards ------------------------------------------------------------- */
-.cards { display: grid; gap: var(--space-4); }
+.cards {
+  display: grid;
+  gap: var(--space-4);
+  /* A default, not just a fallback: if a modifier class is ever missing the
+     grid would otherwise be one full-width column, and a cover at
+     aspect-ratio 1/1.414 would stand taller than the viewport. */
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+}
 .cards.grid { grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); }
 .cards.large { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+/* Belt and braces: nothing in this grid may grow past a sensible card. */
+.cards > .card { max-width: 320px; }
 .card { position: relative; padding: var(--space-3); transition: box-shadow var(--duration) var(--ease); }
 .card:hover { box-shadow: var(--shadow-md); }
 .card-open {

@@ -5,6 +5,8 @@ export interface Folder {
   path: string
   has_children: boolean
   book_count: number
+  folder_count: number
+  item_count: number
   deleted_at: string | null
 }
 

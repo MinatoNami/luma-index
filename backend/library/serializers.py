@@ -9,19 +9,32 @@ class FolderSerializer(serializers.ModelSerializer):
     path = serializers.CharField(read_only=True)
     has_children = serializers.SerializerMethodField()
     book_count = serializers.SerializerMethodField()
+    folder_count = serializers.SerializerMethodField()
+    item_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Folder
         fields = ("id", "name", "parent", "path", "has_children", "book_count",
-                  "deleted_at", "created_at", "updated_at")
-        read_only_fields = ("id", "path", "has_children", "book_count",
-                            "deleted_at", "created_at", "updated_at")
+                  "folder_count", "item_count", "deleted_at", "created_at", "updated_at")
+        read_only_fields = ("id", "path", "has_children", "book_count", "folder_count",
+                            "item_count", "deleted_at", "created_at", "updated_at")
 
     def get_has_children(self, obj) -> bool:
         return obj.children.filter(deleted_at__isnull=True).exists()
 
     def get_book_count(self, obj) -> int:
         return obj.books.filter(deleted_at__isnull=True).count()
+
+    def get_folder_count(self, obj) -> int:
+        return obj.children.filter(deleted_at__isnull=True).count()
+
+    def get_item_count(self, obj) -> int:
+        """Everything directly inside, folders included.
+
+        A ZIP's outermost folder usually holds only subfolders, so counting
+        books alone reported "0 items" for a folder full of books.
+        """
+        return self.get_folder_count(obj) + self.get_book_count(obj)
 
     def validate_name(self, value: str) -> str:
         name = value.strip()
