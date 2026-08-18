@@ -176,15 +176,17 @@ Things built but unproven, or deliberately missing.
 
 | What | Detail |
 | --- | --- |
-| **Removing and recolouring highlights** | Creating them is confirmed working in a real browser. The remove/recolour/note controls were added afterwards and have not been exercised there. |
-| **Single-page mode painting** | Navigation is fixed and verified as far as the tooling allows — the page element is replaced correctly and the counter tracks it. Whether the new page paints needs a real browser. |
 | **The reader on a tablet** | PRD §39 calls tablet a primary reading target. Touch selection and memory behaviour have only been checked on a desktop browser. |
 
-The first two share a cause: the development preview pane cannot render PDFs at
-all. PDF.js drives its render loop with `requestAnimationFrame`, and that pane
-runs with `document.visibilityState: 'hidden'`, where rAF never fires — so a
-render never completes and nothing downstream of it runs. **Anything needing
-pixels on a page has to be checked in a real browser.**
+Creating, removing and recolouring highlights, and single-page navigation, were
+all unverified here and have since been confirmed working in a real browser.
+
+The reason they could not be checked from the development tooling is worth
+keeping: the preview pane cannot render PDFs at all. PDF.js drives its render
+loop with `requestAnimationFrame`, and that pane runs with
+`document.visibilityState: 'hidden'`, where rAF never fires — so a render never
+completes and nothing downstream of it runs. **Anything needing pixels on a page
+has to be checked in a real browser.**
 
 ### Missing for now
 
