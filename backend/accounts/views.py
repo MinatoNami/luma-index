@@ -23,7 +23,11 @@ from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
+
+from common.net import client_ip_for_log
+from common.throttling import TargetedAccountThrottle
 
 from .serializers import (
     LoginSerializer,
@@ -71,14 +75,16 @@ class SessionView(APIView):
 class LoginView(APIView):
     permission_classes = [AllowAny]
     throttle_scope = "auth"
+    throttle_classes = [ScopedRateThrottle, TargetedAccountThrottle]
 
     @extend_schema(summary="Sign in", request=LoginSerializer, responses={200: UserSerializer})
     def post(self, request):
         serializer = LoginSerializer(data=request.data, context={"request": request})
         if not serializer.is_valid():
-            logger.info(
+            logger.warning(
                 "authentication failed",
                 extra={"event": "auth.login.failed",
+                       "client_ip": client_ip_for_log(request),
                        "email_domain": str(request.data.get("email", "")).rsplit("@", 1)[-1]},
             )
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

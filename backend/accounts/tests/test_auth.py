@@ -186,3 +186,109 @@ def test_logout_without_csrf_token_is_rejected(csrf_client: Client, user):
 @pytest.mark.django_db
 def test_csrf_endpoint_itself_needs_no_token(csrf_client: Client):
     assert csrf_client.get(reverse("accounts:csrf")).status_code == 204
+
+
+# --- Rate limiting ----------------------------------------------------------- #
+# These guard two bugs that made PRD §32's "rate limit authentication"
+# decorative: a per-process cache (each gunicorn worker counted separately) and
+# DRF's default NUM_PROXIES=None (the throttle key was the caller's own
+# X-Forwarded-For header, so varying it gave unlimited fresh buckets).
+
+@pytest.fixture
+def throttle_cache():
+    from django.core.cache import cache
+
+    cache.clear()
+    yield
+    cache.clear()
+
+
+def _attempt(client: Client, token: str, email: str = "alice@example.com", **headers):
+    return client.post(reverse("accounts:login"),
+                       {"email": email, "password": "definitely-wrong"},
+                       content_type="application/json",
+                       headers={"x-csrftoken": token, **headers})
+
+
+@pytest.mark.django_db
+@override_settings(REST_FRAMEWORK={
+    **__import__("django.conf", fromlist=["settings"]).settings.REST_FRAMEWORK,
+    "DEFAULT_THROTTLE_RATES": {"auth": "3/min", "login_email": "100/min"},
+})
+def test_repeated_failures_from_one_address_are_throttled(throttle_cache, user):
+    client = Client(enforce_csrf_checks=True)
+    client.get(reverse("accounts:csrf"))
+    token = client.cookies["lumaindex_csrftoken"].value
+
+    codes = [_attempt(client, token).status_code for _ in range(6)]
+    assert 429 in codes, f"never throttled: {codes}"
+
+
+@pytest.mark.django_db
+@override_settings(REST_FRAMEWORK={
+    **__import__("django.conf", fromlist=["settings"]).settings.REST_FRAMEWORK,
+    "DEFAULT_THROTTLE_RATES": {"auth": "3/min", "login_email": "100/min"},
+})
+def test_spoofed_forwarded_for_cannot_reset_the_throttle(throttle_cache, user):
+    """The attack that made the limit useless: a new X-Forwarded-For per request."""
+    client = Client(enforce_csrf_checks=True)
+    client.get(reverse("accounts:csrf"))
+    token = client.cookies["lumaindex_csrftoken"].value
+
+    codes = [
+        _attempt(client, token, **{"x-forwarded-for": f"10.0.0.{i}"}).status_code
+        for i in range(1, 8)
+    ]
+    assert 429 in codes, f"forged X-Forwarded-For bypassed the throttle: {codes}"
+
+
+@pytest.mark.django_db
+@override_settings(REST_FRAMEWORK={
+    **__import__("django.conf", fromlist=["settings"]).settings.REST_FRAMEWORK,
+    "DEFAULT_THROTTLE_RATES": {"auth": "1000/min", "login_email": "3/min"},
+})
+def test_one_account_is_protected_across_addresses(throttle_cache, user):
+    """Distributed stuffing against a single account is capped by the email key."""
+    codes = []
+    for i in range(1, 8):
+        client = Client(enforce_csrf_checks=True)
+        client.get(reverse("accounts:csrf"))
+        token = client.cookies["lumaindex_csrftoken"].value
+        codes.append(_attempt(client, token, **{"x-forwarded-for": f"10.0.0.{i}"}).status_code)
+    assert 429 in codes, f"account-targeted throttle never fired: {codes}"
+
+
+@pytest.mark.django_db
+@override_settings(REST_FRAMEWORK={
+    **__import__("django.conf", fromlist=["settings"]).settings.REST_FRAMEWORK,
+    "DEFAULT_THROTTLE_RATES": {"auth": "1000/min", "login_email": "3/min"},
+})
+def test_throttling_one_account_does_not_block_another(throttle_cache, user):
+    """The per-account limit must not become a denial-of-service against a user."""
+    User.objects.create_user(email="bob@example.com", password=PASSWORD)
+    client = Client(enforce_csrf_checks=True)
+    client.get(reverse("accounts:csrf"))
+    token = client.cookies["lumaindex_csrftoken"].value
+
+    for _ in range(6):
+        _attempt(client, token, email="alice@example.com")
+
+    assert _attempt(client, token, email="bob@example.com").status_code == 400
+
+
+@pytest.mark.django_db
+def test_client_ip_trusts_only_configured_proxy_hops(settings):
+    from django.test import RequestFactory
+
+    from common.net import client_ip
+
+    settings.REST_FRAMEWORK = {**settings.REST_FRAMEWORK, "NUM_PROXIES": 1}
+    from rest_framework.settings import api_settings
+    api_settings.reload()
+
+    request = RequestFactory().get("/")
+    request.META["REMOTE_ADDR"] = "172.18.0.5"
+    request.META["HTTP_X_FORWARDED_FOR"] = "1.2.3.4, 203.0.113.9"
+    # One proxy: trust only the hop it appended, never the forged prefix.
+    assert client_ip(request) == "203.0.113.9"
+    api_settings.reload()

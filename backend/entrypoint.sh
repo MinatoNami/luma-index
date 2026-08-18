@@ -41,6 +41,10 @@ log "postgres is reachable"
 log "applying migrations"
 python manage.py migrate --noinput
 
+# Backs the throttle counters. Idempotent — a no-op once the table exists.
+log "ensuring cache table"
+python manage.py createcachetable
+
 log "collecting static files"
 python manage.py collectstatic --noinput --clear >/dev/null
 

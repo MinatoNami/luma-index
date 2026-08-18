@@ -129,6 +129,24 @@ DATABASES = {
 
 
 # --------------------------------------------------------------------------- #
+# Cache
+# --------------------------------------------------------------------------- #
+# Throttle counters live in the cache, so the cache has to be shared. Django's
+# default LocMemCache is per-process: with N gunicorn workers a "10/min" limit
+# is really 10*N, and every counter resets on deploy. A database cache is
+# correct across workers and restarts, and keeps Redis out of the stack until
+# an async workload actually justifies it (PRD §4, §36).
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.db.DatabaseCache",
+        "LOCATION": "lumaindex_cache",
+        "TIMEOUT": 300,
+        "OPTIONS": {"MAX_ENTRIES": 10000, "CULL_FREQUENCY": 3},
+    }
+}
+
+
+# --------------------------------------------------------------------------- #
 # Authentication
 # --------------------------------------------------------------------------- #
 
@@ -146,6 +164,10 @@ LOGIN_URL = "/login"
 
 # PRD non-goal: no open public registration unless explicitly enabled.
 REGISTRATION_ENABLED = env_bool("LUMA_REGISTRATION_ENABLED", False)
+
+# Include the resolved client address in authentication failure logs. Use it
+# to confirm LUMA_NUM_PROXIES is right on a new deployment (PRD §41).
+LOG_CLIENT_IP = env_bool("LUMA_LOG_CLIENT_IP", False)
 
 
 # --------------------------------------------------------------------------- #
@@ -189,6 +211,17 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework.authentication.SessionAuthentication",
     ],
+    # How many proxies sit in front of Django. This is a security setting, not
+    # a tuning knob: left at DRF's default of None, throttles key on the whole
+    # client-supplied X-Forwarded-For string, so an attacker varying that header
+    # gets an unlimited number of fresh rate-limit buckets.
+    #
+    #   2 = tailscale serve -> caddy -> django   (the deployed topology)
+    #   1 = caddy -> django                      (compose.dev.yaml)
+    #
+    # Verify with LUMA_LOG_CLIENT_IP=True and a failed login: the logged
+    # client_ip must be the real client address, not a proxy's.
+    "NUM_PROXIES": env_int("LUMA_NUM_PROXIES", 2),
     # Deny by default. Every public endpoint must opt out explicitly — the PRD
     # requires authorization to be enforced server-side, and a permissive
     # default is how that requirement quietly stops being true.
@@ -201,7 +234,11 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_THROTTLE_RATES": {
         # PRD §32: rate-limit authentication.
+        # `auth` is per client address; `login_email` is per targeted account,
+        # so credential stuffing against one user is capped even if proxy
+        # configuration ever makes the address unreliable.
         "auth": env("LUMA_THROTTLE_AUTH", "10/min"),
+        "login_email": env("LUMA_THROTTLE_LOGIN_EMAIL", "5/min"),
     },
     "UNAUTHENTICATED_USER": "django.contrib.auth.models.AnonymousUser",
 }

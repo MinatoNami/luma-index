@@ -16,6 +16,9 @@ services:
       DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1,backend"
       DJANGO_CSRF_TRUSTED_ORIGINS: "http://localhost:8080"
       LUMA_REGISTRATION_ENABLED: "True"
+      # Only Caddy sits in front of Django locally; there is no tailscale serve.
+      LUMA_NUM_PROXIES: "1"
+      LUMA_LOG_CLIENT_IP: "True"
     volumes:
       - ./backend:/app
     command: ["python", "manage.py", "runserver", "0.0.0.0:8000"]
