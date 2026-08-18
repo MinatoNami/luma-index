@@ -14,7 +14,6 @@ async function onSubmit() {
     await login(email.value, password.value)
     await navigateTo((route.query.next as string) || '/')
   } catch (err: any) {
-    // Django returns {"detail": [...]} for a failed credential check.
     const detail = err?.data?.detail
     error.value = Array.isArray(detail) ? detail[0] : detail || 'Unable to sign in.'
   } finally {
@@ -25,9 +24,12 @@ async function onSubmit() {
 
 <template>
   <main class="wrap">
-    <form class="panel" @submit.prevent="onSubmit">
-      <h1>LumaIndex</h1>
-      <p class="sub">Sign in to your library.</p>
+    <form class="panel card" @submit.prevent="onSubmit">
+      <div class="brand">
+        <span class="mark" aria-hidden="true" />
+        <h1>LumaIndex</h1>
+      </div>
+      <p class="sub">Your PDF library.</p>
 
       <div class="field">
         <label for="email">Email</label>
@@ -41,28 +43,32 @@ async function onSubmit() {
                autocomplete="current-password" required />
       </div>
 
-      <button type="submit" :disabled="pending">
+      <AppButton variant="primary" type="submit" :loading="pending" class="submit">
         {{ pending ? 'Signing in…' : 'Sign in' }}
-      </button>
+      </AppButton>
 
-      <p v-if="error" class="error" role="alert">{{ error }}</p>
+      <p v-if="error" class="notice notice-error" role="alert">
+        <AppIcon name="warning" :size="17" /> {{ error }}
+      </p>
 
       <p class="forgot"><NuxtLink to="/forgot-password">Forgot your password?</NuxtLink></p>
     </form>
+    <ThemeToggle class="theme" />
   </main>
 </template>
 
 <style scoped>
-.wrap {
-  min-height: 100dvh;
-  display: grid;
-  place-items: center;
-  padding: 1.5rem;
-}
-form { width: min(24rem, 100%); }
-h1 { margin: 0; font-size: 1.5rem; }
-.sub { margin: 0.25rem 0 1.5rem; color: var(--muted); font-size: 0.9rem; }
-.field { margin-bottom: 1rem; }
-button { width: 100%; }
-.forgot { margin: 1.25rem 0 0; font-size: 0.875rem; text-align: center; }
+.wrap { min-height: 100dvh; display: grid; place-items: center; padding: var(--space-5);
+        position: relative; }
+.card { width: min(23rem, 100%); padding: var(--space-6); }
+.brand { display: flex; align-items: center; gap: var(--space-3); }
+.mark { width: 24px; height: 24px; border-radius: 8px;
+        background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #fff)); }
+h1 { margin: 0; font-size: var(--text-xl); }
+.sub { margin: var(--space-2) 0 var(--space-5); color: var(--text-secondary); }
+.field { margin-bottom: var(--space-4); }
+.submit { width: 100%; }
+.notice { margin-top: var(--space-4); }
+.forgot { margin: var(--space-5) 0 0; text-align: center; font-size: var(--text-sm); }
+.theme { position: absolute; top: var(--space-4); right: var(--space-4); }
 </style>

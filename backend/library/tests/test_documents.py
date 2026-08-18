@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from library.documents import (
+    THUMBNAIL_WIDTH,
     DocumentEncrypted,
     DocumentError,
     probe,
@@ -68,7 +69,9 @@ def test_render_thumbnail_produces_an_image(pdf, tmp_path):
     out = render_thumbnail(pdf, tmp_path / "thumbs" / "book.webp")
     assert out.exists() and out.stat().st_size > 0
     width, height = thumbnail_size(out)
-    assert width == 400
+    # Against the constant, not a literal: the width is a product decision that
+    # changes with the UI, and a test should not have to be edited when it does.
+    assert width == THUMBNAIL_WIDTH
     assert height > width, "A4 is taller than it is wide"
 
 
@@ -87,7 +90,8 @@ def test_render_leaves_no_partial_file_on_failure(tmp_path):
         render_thumbnail(broken, destination)
 
     assert not destination.exists()
-    assert not list(destination.parent.glob("*.tmp")) if destination.parent.exists() else True
+    if destination.parent.exists():
+        assert list(destination.parent.iterdir()) == [], "a partial render was left behind"
 
 
 def test_scanned_documents_still_get_a_thumbnail(tmp_path):

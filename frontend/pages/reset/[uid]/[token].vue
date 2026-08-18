@@ -39,7 +39,7 @@ async function onSubmit() {
 
 <template>
   <main class="wrap">
-    <div class="panel">
+    <div class="panel card">
       <template v-if="!done">
         <h1>Choose a new password</h1>
         <p class="sub">At least 12 characters.</p>
@@ -54,10 +54,12 @@ async function onSubmit() {
             <input id="confirm" v-model="confirm" type="password"
                    autocomplete="new-password" required />
           </div>
-          <button type="submit" :disabled="pending">
-            {{ pending ? 'Saving…' : 'Set new password' }}
-          </button>
-          <p v-if="error" class="error" role="alert">{{ error }}</p>
+          <AppButton variant="primary" type="submit" :loading="pending" class="submit">
+            Set new password
+          </AppButton>
+          <p v-if="error" class="notice notice-error" role="alert">
+            <AppIcon name="warning" :size="17" /> {{ error }}
+          </p>
         </form>
       </template>
       <template v-else>
@@ -70,11 +72,11 @@ async function onSubmit() {
 </template>
 
 <style scoped>
-.wrap { min-height: 100dvh; display: grid; place-items: center; padding: 1.5rem; }
-.panel { width: min(24rem, 100%); }
-h1 { margin: 0; font-size: 1.35rem; }
-.sub { margin: 0.25rem 0 1.5rem; color: var(--muted); font-size: 0.9rem; }
-.field { margin-bottom: 1rem; }
-button { width: 100%; }
-.back { margin: 1.25rem 0 0; font-size: 0.875rem; text-align: center; }
+.wrap { min-height: 100dvh; display: grid; place-items: center; padding: var(--space-5); }
+.card { width: min(23rem, 100%); padding: var(--space-6); }
+h1 { margin: 0; font-size: var(--text-xl); }
+.sub { margin: var(--space-2) 0 var(--space-5); color: var(--text-secondary); }
+.field { margin-bottom: var(--space-4); }
+.submit { width: 100%; }
+.back { margin: var(--space-5) 0 0; font-size: var(--text-sm); text-align: center; }
 </style>

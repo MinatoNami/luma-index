@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { formatBytes, type Book, type Folder, type UploadBatch } from '~/composables/useLibrary'
+import type { ViewMode } from '~/components/ViewToggle.vue'
 
 const library = useLibrary()
 const { user, logout } = useAuth()
@@ -16,22 +17,33 @@ const books = ref<Book[]>([])
 const breadcrumbs = ref<Folder[]>([])
 const currentFolder = ref<Folder | null>(null)
 const search = ref('')
+const loading = ref(true)
 const busy = ref(false)
 const error = ref('')
 const notice = ref('')
 const dragging = ref(false)
 const batches = ref<UploadBatch[]>([])
 
-// One dialog driver for rename, new-folder, move and delete confirmation.
+// Remembered locally. PRD §24 wants view preferences on UserSettings so they
+// follow a reader between devices; that lands with the reader.
+const view = useState<ViewMode>('library-view', () => 'list')
+
 const dialog = ref<{
   title: string; label?: string; value?: string; confirmLabel?: string
   danger?: boolean; message?: string; run: (value: string) => Promise<void>
 } | null>(null)
 
 const fileInput = ref<HTMLInputElement | null>(null)
+let dragDepth = 0
 
-async function load() {
-  busy.value = true
+onMounted(() => {
+  const stored = localStorage.getItem('lumaindex-view') as ViewMode | null
+  if (stored) view.value = stored
+})
+watch(view, value => import.meta.client && localStorage.setItem('lumaindex-view', value))
+
+async function load({ quiet = false } = {}) {
+  if (!quiet) loading.value = true
   error.value = ''
   try {
     const [folderList, bookList] = await Promise.all([
@@ -52,18 +64,30 @@ async function load() {
   } catch (err: any) {
     error.value = err?.data?.detail || 'Could not load this folder.'
   } finally {
-    busy.value = false
+    loading.value = false
   }
 }
 
-watch(() => route.query.folder, load)
-watch(search, () => load())
-onMounted(load)
+watch(() => route.query.folder, () => load())
+watch(search, () => load({ quiet: true }))
+onMounted(() => load())
+
+// Covers are rendered after upload, so poll briefly while any are missing.
+let coverTimer: ReturnType<typeof setTimeout> | null = null
+watch(books, list => {
+  if (coverTimer) clearTimeout(coverTimer)
+  if (list.some(b => !b.thumbnail_path)) {
+    coverTimer = setTimeout(() => load({ quiet: true }), 2500)
+  }
+})
+onBeforeUnmount(() => {
+  if (coverTimer) clearTimeout(coverTimer)
+  if (pollTimer) clearTimeout(pollTimer)
+})
 
 function open(folder: Folder) {
   router.push({ query: { folder: String(folder.id) } })
 }
-
 function goTo(id: number | null) {
   router.push({ query: id === null ? {} : { folder: String(id) } })
 }
@@ -74,7 +98,7 @@ async function act(work: () => Promise<unknown>, message = '') {
   try {
     await work()
     notice.value = message
-    await load()
+    await load({ quiet: true })
   } catch (err: any) {
     error.value = err?.data?.detail || 'That did not work.'
   } finally {
@@ -89,19 +113,20 @@ async function submitFiles(files: File[]) {
   if (!files.length) return
   busy.value = true
   error.value = ''
+  notice.value = ''
   try {
     const result = await library.upload(files, currentId.value)
     const parts: string[] = []
     if (result.imported.length) parts.push(`${result.imported.length} added`)
     if (result.duplicates) parts.push(`${result.duplicates} already here`)
-    if (result.batches.length) parts.push(`${result.batches.length} archive(s) queued`)
-    notice.value = parts.join(', ') || 'Nothing to add.'
+    if (result.batches.length) parts.push(`${result.batches.length} archive queued`)
+    notice.value = parts.join(' · ') || 'Nothing to add.'
     if (result.errors.length) error.value = result.errors.join(' · ')
     if (result.batches.length) {
       batches.value = result.batches
       pollBatches()
     }
-    await load()
+    await load({ quiet: true })
   } catch (err: any) {
     error.value = err?.data?.detail || 'Upload failed.'
   } finally {
@@ -113,21 +138,22 @@ let pollTimer: ReturnType<typeof setTimeout> | null = null
 
 async function pollBatches() {
   if (pollTimer) clearTimeout(pollTimer)
-  const updated = await Promise.all(batches.value.map(b => library.batch(b.id).catch(() => b)))
-  batches.value = updated
-  if (updated.some(b => b.status === 'pending' || b.status === 'running')) {
-    pollTimer = setTimeout(pollBatches, 1500)
+  batches.value = await Promise.all(batches.value.map(b => library.batch(b.id).catch(() => b)))
+  if (batches.value.some(b => b.status === 'pending' || b.status === 'running')) {
+    pollTimer = setTimeout(pollBatches, 1200)
   } else {
-    await load()   // extraction finished; the folders now exist
+    await load({ quiet: true })
   }
 }
 
-onBeforeUnmount(() => pollTimer && clearTimeout(pollTimer))
-
 function onDrop(event: DragEvent) {
+  dragDepth = 0
   dragging.value = false
   submitFiles(Array.from(event.dataTransfer?.files ?? []))
 }
+// Counted, because dragging over a child element fires dragleave on the parent.
+function onDragEnter() { dragDepth += 1; dragging.value = true }
+function onDragLeave() { dragDepth -= 1; if (dragDepth <= 0) dragging.value = false }
 
 function onPick(event: Event) {
   const input = event.target as HTMLInputElement
@@ -135,7 +161,7 @@ function onPick(event: Event) {
   input.value = ''
 }
 
-// -- row actions ------------------------------------------------------------ //
+// -- actions ---------------------------------------------------------------- //
 
 function newFolder() {
   dialog.value = {
@@ -143,34 +169,27 @@ function newFolder() {
     run: async name => { await library.createFolder(name, currentId.value) },
   }
 }
-
 function renameFolder(folder: Folder) {
   dialog.value = {
     title: 'Rename folder', label: 'Name', value: folder.name, confirmLabel: 'Rename',
     run: async name => { await library.updateFolder(folder.id, { name }) },
   }
 }
-
 function renameBook(book: Book) {
   dialog.value = {
     title: 'Rename', label: 'Title', value: book.title, confirmLabel: 'Rename',
     run: async title => { await library.updateBook(book.id, { title }) },
   }
 }
-
 function moveUp(item: Folder | Book, kind: 'folder' | 'book') {
   const destination = currentFolder.value?.parent ?? null
-  return act(
-    () => kind === 'folder'
-      ? library.updateFolder(item.id, { parent: destination })
-      : library.updateBook(item.id, { folder: destination }),
-    'Moved up one level.',
-  )
+  return act(() => kind === 'folder'
+    ? library.updateFolder(item.id, { parent: destination })
+    : library.updateBook(item.id, { folder: destination }), 'Moved up one level.')
 }
-
 function deleteFolder(folder: Folder) {
   dialog.value = {
-    title: `Move "${folder.name}" to trash?`,
+    title: `Move “${folder.name}” to trash?`,
     message: folder.book_count || folder.has_children
       ? 'Everything inside goes with it. You can restore it from the trash.'
       : 'You can restore it from the trash.',
@@ -178,10 +197,9 @@ function deleteFolder(folder: Folder) {
     run: async () => { await library.trashFolder(folder.id) },
   }
 }
-
 function deleteBook(book: Book) {
   dialog.value = {
-    title: `Move "${book.title}" to trash?`,
+    title: `Move “${book.title}” to trash?`,
     message: 'You can restore it from the trash.',
     confirmLabel: 'Move to trash', danger: true,
     run: async () => { await library.trashBook(book.id) },
@@ -190,174 +208,325 @@ function deleteBook(book: Book) {
 
 function folderActions(folder: Folder) {
   return [
-    { label: 'Rename', run: () => renameFolder(folder) },
+    { label: 'Rename', icon: 'pencil', run: () => renameFolder(folder) },
     ...(currentId.value !== null
-      ? [{ label: 'Move up one level', run: () => moveUp(folder, 'folder') }]
+      ? [{ label: 'Move up one level', icon: 'arrow-up', run: () => moveUp(folder, 'folder') }]
       : []),
-    { label: 'Move to trash', danger: true, run: () => deleteFolder(folder) },
+    { label: 'Move to trash', icon: 'trash', danger: true, run: () => deleteFolder(folder) },
   ]
 }
-
 function bookActions(book: Book) {
   return [
-    { label: 'Rename', run: () => renameBook(book) },
-    { label: 'Download', run: () => window.open(`/api/library/books/${book.id}/content`, '_blank') },
+    { label: 'Rename', icon: 'pencil', run: () => renameBook(book) },
+    { label: 'Open', icon: 'file',
+      run: () => window.open(`/api/library/books/${book.id}/content`, '_blank') },
     ...(currentId.value !== null
-      ? [{ label: 'Move up one level', run: () => moveUp(book, 'book') }]
+      ? [{ label: 'Move up one level', icon: 'arrow-up', run: () => moveUp(book, 'book') }]
       : []),
-    { label: 'Move to trash', danger: true, run: () => deleteBook(book) },
+    { label: 'Move to trash', icon: 'trash', danger: true, run: () => deleteBook(book) },
   ]
 }
 
-const isEmpty = computed(() => !busy.value && !folders.value.length && !books.value.length)
+const isEmpty = computed(() => !loading.value && !folders.value.length && !books.value.length)
+const bookHref = (book: Book) => `/api/library/books/${book.id}/content`
 </script>
 
 <template>
-  <main class="wrap" @dragover.prevent="dragging = true" @dragleave.self="dragging = false"
-        @drop.prevent="onDrop">
-    <header>
-      <h1>LumaIndex</h1>
-      <div class="who">
-        <NuxtLink to="/trash">Trash</NuxtLink>
-        <span>{{ user?.display_name || user?.email }}</span>
-        <button class="secondary" type="button" @click="logout">Sign out</button>
+  <div class="shell" @dragenter.prevent="onDragEnter" @dragover.prevent
+       @dragleave.prevent="onDragLeave" @drop.prevent="onDrop">
+    <header class="topbar">
+      <div class="brand">
+        <span class="mark" aria-hidden="true" />
+        <strong>LumaIndex</strong>
+      </div>
+      <div class="account">
+        <ThemeToggle />
+        <NuxtLink class="quiet-link" to="/trash">
+          <AppIcon name="trash" :size="16" /> Trash
+        </NuxtLink>
+        <span class="who tertiary">{{ user?.display_name || user?.email }}</span>
+        <AppButton variant="ghost" size="sm" @click="logout">Sign out</AppButton>
       </div>
     </header>
 
-    <nav class="crumbs" aria-label="Breadcrumb">
-      <button type="button" class="crumb" @click="goTo(null)">My library</button>
-      <template v-for="crumb in breadcrumbs" :key="crumb.id">
-        <span aria-hidden="true">/</span>
-        <button type="button" class="crumb" @click="goTo(crumb.id)">{{ crumb.name }}</button>
-      </template>
-      <template v-if="currentFolder">
-        <span aria-hidden="true">/</span>
-        <span class="crumb current">{{ currentFolder.name }}</span>
-      </template>
-    </nav>
+    <main class="wrap">
+      <nav class="crumbs" aria-label="Breadcrumb">
+        <button type="button" class="crumb" @click="goTo(null)">My library</button>
+        <template v-for="crumb in breadcrumbs" :key="crumb.id">
+          <AppIcon name="chevron-right" :size="14" class="sep" />
+          <button type="button" class="crumb" @click="goTo(crumb.id)">{{ crumb.name }}</button>
+        </template>
+        <template v-if="currentFolder">
+          <AppIcon name="chevron-right" :size="14" class="sep" />
+          <span class="crumb current" aria-current="page">{{ currentFolder.name }}</span>
+        </template>
+      </nav>
 
-    <div class="toolbar">
-      <input v-model="search" type="search" placeholder="Search titles…" aria-label="Search" />
-      <div class="spacer" />
-      <button class="secondary" type="button" :disabled="busy" @click="newFolder">
-        New folder
-      </button>
-      <button type="button" :disabled="busy" @click="fileInput?.click()">Upload</button>
-      <input ref="fileInput" class="hidden-input" type="file" multiple
-             accept="application/pdf,.pdf,.zip,application/zip" @change="onPick" />
-    </div>
+      <div class="toolbar">
+        <div class="search">
+          <AppIcon name="search" :size="16" />
+          <input v-model="search" type="search" placeholder="Search titles…"
+                 aria-label="Search titles" />
+        </div>
+        <div class="spacer" />
+        <ViewToggle v-model="view" />
+        <AppButton icon="folder-plus" :disabled="busy" @click="newFolder">New folder</AppButton>
+        <AppButton variant="primary" icon="upload" :loading="busy"
+                   @click="fileInput?.click()">Upload</AppButton>
+        <input ref="fileInput" class="sr-only" type="file" multiple tabindex="-1"
+               accept="application/pdf,.pdf,.zip,application/zip" @change="onPick" />
+      </div>
 
-    <p v-if="error" class="notice bad" role="alert">{{ error }}</p>
-    <p v-else-if="notice" class="notice" role="status">{{ notice }}</p>
-
-    <ul v-if="batches.length" class="batches">
-      <li v-for="batch in batches" :key="batch.id">
-        <strong>{{ batch.original_filename }}</strong>
-        <span class="muted">
-          {{ batch.status === 'pending' ? 'queued' : batch.status }}
-          <template v-if="batch.counts.discovered">
-            — {{ batch.counts.imported }}/{{ batch.counts.discovered }} imported
-            <template v-if="batch.counts.skipped_duplicate">
-              , {{ batch.counts.skipped_duplicate }} already here
-            </template>
-          </template>
-        </span>
-      </li>
-    </ul>
-
-    <div v-if="dragging" class="dropzone">Drop PDFs or a ZIP to add them here</div>
-
-    <table v-if="!isEmpty" class="listing">
-      <thead>
-        <tr><th scope="col">Name</th><th scope="col">Size</th><th scope="col">Pages</th>
-          <th scope="col"><span class="sr-only">Actions</span></th></tr>
-      </thead>
-      <tbody>
-        <tr v-for="folder in folders" :key="`f${folder.id}`">
-          <td>
-            <button class="name" type="button" @click="open(folder)">
-              <span aria-hidden="true">📁</span> {{ folder.name }}
-            </button>
-          </td>
-          <td class="muted">{{ folder.book_count }} item(s)</td>
-          <td />
-          <td class="actions"><RowMenu :actions="folderActions(folder)" /></td>
-        </tr>
-        <tr v-for="book in books" :key="`b${book.id}`">
-          <td>
-            <a class="name" :href="`/api/library/books/${book.id}/content`" target="_blank">
-              <span aria-hidden="true">📄</span> {{ book.title }}
-            </a>
-            <span v-if="book.source?.availability_status !== 'available'" class="warn">
-              file unavailable
-            </span>
-          </td>
-          <td class="muted">{{ book.source ? formatBytes(book.source.file_size) : '—' }}</td>
-          <td class="muted">{{ book.page_count ?? '…' }}</td>
-          <td class="actions"><RowMenu :actions="bookActions(book)" /></td>
-        </tr>
-      </tbody>
-    </table>
-
-    <div v-if="isEmpty" class="empty panel">
-      <h2>{{ search ? 'Nothing matches that' : 'This folder is empty' }}</h2>
-      <p v-if="!search">
-        Drag PDFs here, or upload a ZIP — its folders are recreated as you had them.
+      <p v-if="error" class="notice notice-error" role="alert">
+        <AppIcon name="warning" :size="17" /> {{ error }}
       </p>
+      <p v-else-if="notice" class="notice notice-info" role="status">
+        <AppIcon name="check" :size="17" /> {{ notice }}
+      </p>
+
+      <ul v-if="batches.length" class="batches">
+        <li v-for="batch in batches" :key="batch.id" class="panel">
+          <AppIcon name="upload" :size="17" />
+          <div class="batch-body">
+            <strong>{{ batch.original_filename }}</strong>
+            <span class="tertiary">
+              {{ batch.status === 'pending' ? 'queued' : batch.status }}
+              <template v-if="batch.counts.discovered">
+                · {{ batch.counts.imported }}/{{ batch.counts.discovered }} imported
+              </template>
+              <template v-if="batch.counts.skipped_duplicate">
+                · {{ batch.counts.skipped_duplicate }} already here
+              </template>
+            </span>
+          </div>
+        </li>
+      </ul>
+
+      <!-- List --------------------------------------------------------- -->
+      <div v-if="!isEmpty && view === 'list'" class="listing panel">
+        <div class="row head">
+          <span>Name</span><span>Size</span><span>Pages</span><span />
+        </div>
+        <div v-for="folder in folders" :key="`f${folder.id}`" class="row">
+          <button class="cell name" type="button" @click="open(folder)">
+            <span class="folder-chip"><AppIcon name="folder" :size="17" /></span>
+            <span class="label">{{ folder.name }}</span>
+          </button>
+          <span class="cell tertiary">{{ folder.book_count }} item{{ folder.book_count === 1 ? '' : 's' }}</span>
+          <span class="cell" />
+          <RowMenu :actions="folderActions(folder)" :label="`Actions for ${folder.name}`" />
+        </div>
+        <div v-for="book in books" :key="`b${book.id}`" class="row">
+          <a class="cell name" :href="bookHref(book)" target="_blank" rel="noopener">
+            <BookCover :book="book" size="sm" />
+            <span class="label">{{ book.title }}</span>
+            <span v-if="book.source?.availability_status !== 'available'" class="badge-warn">
+              unavailable
+            </span>
+          </a>
+          <span class="cell tertiary">{{ book.source ? formatBytes(book.source.file_size) : '—' }}</span>
+          <span class="cell tertiary">{{ book.page_count ?? '…' }}</span>
+          <RowMenu :actions="bookActions(book)" :label="`Actions for ${book.title}`" />
+        </div>
+      </div>
+
+      <!-- Grid and large icons ----------------------------------------- -->
+      <div v-else-if="!isEmpty" :class="['cards', view]">
+        <div v-for="folder in folders" :key="`f${folder.id}`" class="card folder-card panel">
+          <button class="card-open" type="button" @click="open(folder)">
+            <span class="folder-art"><AppIcon name="folder" :size="view === 'large' ? 34 : 26" /></span>
+            <span class="card-title">{{ folder.name }}</span>
+            <span class="card-meta tertiary">
+              {{ folder.book_count }} item{{ folder.book_count === 1 ? '' : 's' }}
+            </span>
+          </button>
+          <RowMenu class="card-menu" :actions="folderActions(folder)"
+                   :label="`Actions for ${folder.name}`" />
+        </div>
+        <div v-for="book in books" :key="`b${book.id}`" class="card panel">
+          <a class="card-open" :href="bookHref(book)" target="_blank" rel="noopener">
+            <BookCover :book="book" :size="view === 'large' ? 'lg' : 'md'" />
+            <span class="card-title">{{ book.title }}</span>
+            <span class="card-meta tertiary">
+              {{ book.page_count ? `${book.page_count} pages` : 'Preparing…' }}
+              <template v-if="book.source"> · {{ formatBytes(book.source.file_size) }}</template>
+            </span>
+          </a>
+          <RowMenu class="card-menu" :actions="bookActions(book)"
+                   :label="`Actions for ${book.title}`" />
+        </div>
+      </div>
+
+      <!-- Skeleton and empty -------------------------------------------- -->
+      <div v-if="loading" :class="['cards', view === 'list' ? 'grid' : view]">
+        <div v-for="n in 4" :key="n" class="card panel skeleton">
+          <div class="skeleton-cover" /><div class="skeleton-line" />
+        </div>
+      </div>
+
+      <EmptyState v-else-if="isEmpty"
+                  :icon="search ? 'search' : 'inbox'"
+                  :title="search ? 'Nothing matches that' : 'This folder is empty'"
+                  :description="search
+                    ? 'Try a different word, or clear the search.'
+                    : 'Drag PDFs here, or upload a ZIP — its folders are recreated as you had them.'">
+        <AppButton v-if="!search" variant="primary" icon="upload" @click="fileInput?.click()">
+          Upload files
+        </AppButton>
+      </EmptyState>
+    </main>
+
+    <div v-if="dragging" class="dropzone" aria-hidden="true">
+      <div class="dropzone-inner">
+        <AppIcon name="upload" :size="26" />
+        <strong>Drop to add to {{ currentFolder?.name || 'your library' }}</strong>
+        <span class="tertiary">PDFs, or a ZIP of them</span>
+      </div>
     </div>
 
     <PromptDialog v-if="dialog" :title="dialog.title" :label="dialog.label"
                   :model-value="dialog.value" :confirm-label="dialog.confirmLabel"
-                  :danger="dialog.danger" :message="dialog.message"
+                  :danger="dialog.danger" :message="dialog.message" :busy="busy"
                   @cancel="dialog = null"
                   @confirm="value => act(() => dialog!.run(value))" />
-  </main>
+  </div>
 </template>
 
 <style scoped>
-.wrap { max-width: 62rem; margin: 0 auto; padding: 1.5rem; min-height: 100dvh; }
-header { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center;
-         justify-content: space-between; margin-bottom: 1rem; }
-h1 { font-size: 1.35rem; margin: 0; }
-.who { display: flex; align-items: center; gap: 1rem; color: var(--muted); font-size: 0.9rem; }
-.crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem;
-          color: var(--muted); font-size: 0.9rem; margin-bottom: 1rem; }
-.crumb { background: none; border: 0; color: var(--accent); padding: 0.2rem 0.25rem;
-         min-height: 0; font-size: 0.9rem; border-radius: 4px; }
-.crumb.current { color: var(--text); }
-.toolbar { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center;
-           margin-bottom: 1rem; }
-.toolbar input[type="search"] { width: min(18rem, 100%); padding: 0.6rem 0.8rem;
-  border: 1px solid var(--border); border-radius: 8px; background: var(--surface);
-  color: var(--text); font: inherit; }
-.spacer { flex: 1; }
-.hidden-input { display: none; }
-.notice { border-radius: 8px; padding: 0.7rem 1rem; font-size: 0.9rem;
-          background: color-mix(in srgb, var(--accent) 12%, transparent); }
-.notice.bad { background: color-mix(in srgb, var(--danger) 14%, transparent);
-              color: var(--danger); }
-.batches { list-style: none; margin: 0 0 1rem; padding: 0; display: grid; gap: 0.35rem; }
-.batches li { font-size: 0.9rem; display: flex; gap: 0.5rem; flex-wrap: wrap; }
-.dropzone { border: 2px dashed var(--accent); border-radius: var(--radius);
-            padding: 2.5rem; text-align: center; color: var(--accent); margin-bottom: 1rem; }
-.listing { width: 100%; border-collapse: collapse; }
-.listing th { text-align: left; font-size: 0.8rem; color: var(--muted); font-weight: 500;
-              padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border); }
-.listing td { padding: 0.4rem 0.75rem; border-bottom: 1px solid var(--border);
-              vertical-align: middle; }
-.listing td.actions { width: 3rem; text-align: right; }
-.name { background: none; border: 0; color: var(--text); font: inherit; text-align: left;
-        padding: 0.35rem 0; min-height: 36px; text-decoration: none; display: inline-block; }
-.name:hover { color: var(--accent); }
-.muted { color: var(--muted); font-size: 0.9rem; white-space: nowrap; }
-.warn { color: var(--danger); font-size: 0.8rem; margin-left: 0.5rem; }
-.empty { text-align: center; padding: 3rem 1.5rem; }
-.empty h2 { font-size: 1rem; margin: 0 0 0.5rem; }
-.empty p { color: var(--muted); font-size: 0.9rem; margin: 0; }
-.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.shell { min-height: 100dvh; display: flex; flex-direction: column; }
 
-@media (max-width: 40rem) {
-  .listing th:nth-child(2), .listing td:nth-child(2),
-  .listing th:nth-child(3), .listing td:nth-child(3) { display: none; }
+.topbar {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-4);
+  padding: var(--space-3) var(--space-5);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 20;
+}
+.brand { display: flex; align-items: center; gap: var(--space-3); font-size: var(--text-md); }
+.mark {
+  width: 22px; height: 22px; border-radius: 7px;
+  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #fff));
+}
+.account { display: flex; align-items: center; gap: var(--space-3); }
+.quiet-link {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  color: var(--text-secondary); text-decoration: none; font-size: var(--text-base);
+}
+.quiet-link:hover { color: var(--text); }
+.who { font-size: var(--text-sm); }
+
+.wrap { width: 100%; max-width: 72rem; margin: 0 auto;
+        padding: var(--space-5); display: grid; gap: var(--space-4); align-content: start; }
+
+.crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); }
+.crumb {
+  background: none; border: 0; padding: var(--space-1) var(--space-2);
+  color: var(--accent-text); font-size: var(--text-base); border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.crumb:hover { background: var(--surface-hover); }
+.crumb.current { color: var(--text); font-weight: 500; cursor: default; }
+.sep { color: var(--text-tertiary); }
+
+.toolbar { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; }
+.search { position: relative; display: flex; align-items: center; width: min(20rem, 100%); }
+.search > svg { position: absolute; left: var(--space-3); color: var(--text-tertiary); }
+.search input { padding-left: calc(var(--space-3) * 2 + 16px); }
+.spacer { flex: 1; }
+
+.batches { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.batches li { display: flex; align-items: center; gap: var(--space-3);
+              padding: var(--space-3) var(--space-4); color: var(--text-secondary); }
+.batch-body { display: flex; flex-direction: column; }
+.batch-body strong { color: var(--text); font-size: var(--text-base); }
+.batch-body span { font-size: var(--text-sm); }
+
+/* -- list -------------------------------------------------------------- */
+.listing { overflow: hidden; }
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 8rem 5rem 40px;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+.row:last-child { border-bottom: 0; }
+.row:not(.head):hover { background: var(--surface-hover); }
+.row.head {
+  font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--text-tertiary); background: var(--surface-sunken); padding-block: var(--space-2);
+}
+.cell { min-width: 0; font-size: var(--text-base); }
+.name {
+  display: flex; align-items: center; gap: var(--space-3);
+  background: none; border: 0; padding: var(--space-1) 0; text-align: left;
+  color: var(--text); text-decoration: none; cursor: pointer; min-width: 0;
+}
+.name:hover .label { color: var(--accent-text); }
+.label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-chip {
+  display: grid; place-items: center; width: 28px; height: 28px; flex: none;
+  border-radius: var(--radius-sm); background: var(--accent-soft); color: var(--accent-text);
+}
+.badge-warn {
+  flex: none; font-size: var(--text-xs); padding: 2px var(--space-2);
+  border-radius: var(--radius-full); background: var(--danger-soft); color: var(--danger-text);
+}
+
+/* -- cards ------------------------------------------------------------- */
+.cards { display: grid; gap: var(--space-4); }
+.cards.grid { grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); }
+.cards.large { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+.card { position: relative; padding: var(--space-3); transition: box-shadow var(--duration) var(--ease); }
+.card:hover { box-shadow: var(--shadow-md); }
+.card-open {
+  display: grid; gap: var(--space-2); width: 100%;
+  background: none; border: 0; padding: 0; text-align: left;
+  color: inherit; text-decoration: none; cursor: pointer;
+}
+.card-title {
+  font-size: var(--text-base); font-weight: 500;
+  display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2;
+  -webkit-box-orient: vertical; overflow: hidden;
+}
+.card-meta { font-size: var(--text-xs); }
+.card-menu { position: absolute; top: var(--space-2); right: var(--space-2);
+             background: var(--surface); border-radius: var(--radius-sm); }
+.folder-card .card-open { align-content: start; }
+.folder-art {
+  display: grid; place-items: center;
+  aspect-ratio: 1 / 1.414;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft); color: var(--accent-text);
+}
+
+/* -- skeleton ----------------------------------------------------------- */
+.skeleton { pointer-events: none; }
+.skeleton-cover { aspect-ratio: 1 / 1.414; border-radius: var(--radius-sm);
+                  background: var(--surface-sunken); }
+.skeleton-line { height: 12px; margin-top: var(--space-3); border-radius: var(--radius-full);
+                 background: var(--surface-sunken); }
+
+/* -- dropzone ----------------------------------------------------------- */
+.dropzone {
+  position: fixed; inset: 0; z-index: 40; display: grid; place-items: center;
+  padding: var(--space-5); background: rgb(20 19 16 / 45%);
+}
+.dropzone-inner {
+  display: grid; justify-items: center; gap: var(--space-2);
+  padding: var(--space-7) var(--space-6);
+  width: min(30rem, 100%);
+  border: 2px dashed var(--accent); border-radius: var(--radius-lg);
+  background: var(--surface); color: var(--accent-text);
+}
+.dropzone-inner strong { color: var(--text); }
+
+@media (max-width: 46rem) {
+  .row { grid-template-columns: minmax(0, 1fr) 32px; }
+  .row > .cell:nth-child(2), .row > .cell:nth-child(3),
+  .row.head > span:nth-child(2), .row.head > span:nth-child(3) { display: none; }
+  .topbar { padding-inline: var(--space-4); }
+  .who { display: none; }
 }
 </style>

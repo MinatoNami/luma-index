@@ -24,8 +24,10 @@ TEXT_PROBE_PAGES = 8
 # Scanned PDFs often carry a few stray characters from a cover or a stamp.
 TEXT_PROBE_MIN_CHARS = 40
 
-THUMBNAIL_WIDTH = 400
-THUMBNAIL_QUALITY = 80
+# Wide enough to stay sharp in the large-icon view on a 2x display; the
+# list and grid views scale the same file down.
+THUMBNAIL_WIDTH = 600
+THUMBNAIL_QUALITY = 82
 
 
 class DocumentError(Exception):

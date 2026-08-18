@@ -1,87 +1,102 @@
-/* Minimal design tokens. Phase 3 replaces this with the real library UI. */
-:root {
-  color-scheme: light dark;
-  --bg: #fbfbfd;
-  --surface: #ffffff;
-  --border: #e3e3e8;
-  --text: #1c1c22;
-  --muted: #6b6b78;
-  --accent: #3b5bdb;
-  --danger: #c92a2a;
-  --radius: 10px;
-}
+@import "./tokens.css";
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #131317;
-    --surface: #1c1c22;
-    --border: #2e2e38;
-    --text: #ecedf1;
-    --muted: #9a9aa8;
-    --accent: #748ffc;
-    --danger: #ff8787;
-  }
-}
+/* Base styles. Component-specific rules live with their components. */
 
-* { box-sizing: border-box; }
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
 
 body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: 1.55;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-a { color: var(--accent); }
+h1, h2, h3, h4 { line-height: 1.25; letter-spacing: -0.01em; }
 
-/* PRD §40: focus must stay visible for keyboard users. */
+a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+a:hover { color: var(--accent); }
+
+/* PRD §40: focus must stay visible for keyboard users, and only for them —
+   a persistent ring on mouse clicks reads as a rendering bug. */
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
+  border-radius: var(--radius-sm);
 }
+:focus:not(:focus-visible) { outline: none; }
+
+button, input, select, textarea { font: inherit; color: inherit; }
+
+label {
+  display: block;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-2);
+}
+
+input[type="email"],
+input[type="password"],
+input[type="text"],
+input[type="search"] {
+  width: 100%;
+  min-height: var(--tap-target);
+  padding: 0 var(--space-3);
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  transition: border-color var(--duration-fast) var(--ease),
+              box-shadow var(--duration-fast) var(--ease);
+}
+input::placeholder { color: var(--text-tertiary); }
+input:focus-visible {
+  outline: none;
+  border-color: var(--focus);
+  box-shadow: var(--shadow-focus);
+}
+
+input[type="search"] { appearance: none; }
 
 .panel {
   background: var(--surface);
   border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+.muted { color: var(--text-secondary); }
+.tertiary { color: var(--text-tertiary); }
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+
+/* Notices ---------------------------------------------------------------- */
+.notice {
+  display: flex; align-items: flex-start; gap: var(--space-3);
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
   border-radius: var(--radius);
-  padding: 1.5rem;
+  border: 1px solid transparent;
+  font-size: var(--text-base);
 }
-
-label { display: block; font-size: 0.875rem; color: var(--muted); margin-bottom: 0.35rem; }
-
-input[type="email"], input[type="password"], input[type="text"] {
-  width: 100%;
-  padding: 0.7rem 0.8rem;
-  font-size: 1rem;
-  color: var(--text);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-
-button {
-  font: inherit;
-  padding: 0.7rem 1rem;
-  border: 0;
-  border-radius: 8px;
-  background: var(--accent);
-  color: #fff;
-  cursor: pointer;
-  /* PRD §40: comfortable touch target on tablet/mobile. */
-  min-height: 44px;
-}
-
-button[disabled] { opacity: 0.6; cursor: not-allowed; }
-
-button.secondary { background: transparent; color: var(--muted); border: 1px solid var(--border); }
-
-.error {
-  color: var(--danger);
-  font-size: 0.9rem;
-  margin: 0.75rem 0 0;
-}
+.notice-info { background: var(--accent-soft); border-color: var(--border); color: var(--text); }
+.notice-error { background: var(--danger-soft); border-color: var(--danger-soft);
+                color: var(--danger-text); }
+.notice-success { background: var(--success-soft); color: var(--success); }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation: none !important; transition: none !important; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

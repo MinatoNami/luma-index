@@ -23,7 +23,7 @@ async function onSubmit() {
 
 <template>
   <main class="wrap">
-    <div class="panel">
+    <div class="panel card">
       <template v-if="!sent">
         <h1>Reset your password</h1>
         <p class="sub">We'll email you a link if this address has an account.</p>
@@ -33,9 +33,9 @@ async function onSubmit() {
             <input id="email" v-model="email" type="email" autocomplete="username" required
                    autocapitalize="none" spellcheck="false" />
           </div>
-          <button type="submit" :disabled="pending">
-            {{ pending ? 'Sending…' : 'Send reset link' }}
-          </button>
+          <AppButton variant="primary" type="submit" :loading="pending" class="submit">
+            Send reset link
+          </AppButton>
         </form>
       </template>
       <template v-else>
@@ -51,11 +51,11 @@ async function onSubmit() {
 </template>
 
 <style scoped>
-.wrap { min-height: 100dvh; display: grid; place-items: center; padding: 1.5rem; }
-.panel { width: min(24rem, 100%); }
-h1 { margin: 0; font-size: 1.35rem; }
-.sub { margin: 0.25rem 0 1.5rem; color: var(--muted); font-size: 0.9rem; }
-.field { margin-bottom: 1rem; }
-button { width: 100%; }
-.back { margin: 1.25rem 0 0; font-size: 0.875rem; text-align: center; }
+.wrap { min-height: 100dvh; display: grid; place-items: center; padding: var(--space-5); }
+.card { width: min(23rem, 100%); padding: var(--space-6); }
+h1 { margin: 0; font-size: var(--text-xl); }
+.sub { margin: var(--space-2) 0 var(--space-5); color: var(--text-secondary); }
+.field { margin-bottom: var(--space-4); }
+.submit { width: 100%; }
+.back { margin: var(--space-5) 0 0; font-size: var(--text-sm); text-align: center; }
 </style>

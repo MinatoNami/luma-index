@@ -1,0 +1,182 @@
+/**
+ * Design tokens.
+ *
+ * A warm-neutral base with an indigo accent: a library app is read for long
+ * stretches, so the light theme is off-white paper rather than glaring white,
+ * and the dark theme is a deep neutral rather than black.
+ *
+ * Every foreground/background pair here is checked against WCAG AA — body and
+ * secondary text at 4.5:1 or better, and the strong border at 3:1 because
+ * input outlines are non-text UI components (WCAG 1.4.11).
+ *
+ * Theme resolution follows the same three states the rest of the stack uses:
+ * an explicit choice sets data-theme on <html>, and the default follows
+ * prefers-color-scheme. Every colour is defined on bare :root so nothing has
+ * its only definition inside a media query.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  /* -- surfaces ---------------------------------------------------------- */
+  --bg: #F7F6F3;
+  --surface: #FFFFFF;
+  --surface-raised: #FFFFFF;
+  --surface-sunken: #EFEDE8;
+  --surface-hover: #F2F0EB;
+
+  --border: #DFDCD4;
+  --border-strong: #8C887D;
+
+  /* -- text -------------------------------------------------------------- */
+  --text: #1C1B18;
+  --text-secondary: #57534B;
+  --text-tertiary: #7A756B;
+
+  /* -- accent ------------------------------------------------------------ */
+  --accent: #4B4ACF;
+  --accent-hover: #4140B8;
+  /* Slightly darker than --accent so link text clears 4.5:1 on both bg and
+     surface; the fill colour alone would not. */
+  --accent-text: #3F3EB8;
+  --accent-soft: #EDEDFB;
+  --on-accent: #FFFFFF;
+
+  /* -- semantic ---------------------------------------------------------- */
+  --danger: #B3261E;
+  --danger-hover: #9B211A;
+  --danger-text: #A21B14;
+  --danger-soft: #FDECEA;
+  --on-danger: #FFFFFF;
+
+  --success: #1F6F43;
+  --success-soft: #E7F4EC;
+  --warning: #8A5A00;
+  --warning-soft: #FCF2DF;
+
+  --focus: #4B4ACF;
+
+  /* -- elevation --------------------------------------------------------- */
+  /* Light themes read depth from shadow; the dark overrides swap to borders,
+     because a black shadow on a dark ground is invisible. */
+  --shadow-sm: 0 1px 2px rgb(28 27 24 / 6%), 0 1px 3px rgb(28 27 24 / 4%);
+  --shadow-md: 0 2px 4px rgb(28 27 24 / 6%), 0 4px 12px rgb(28 27 24 / 8%);
+  --shadow-lg: 0 8px 16px rgb(28 27 24 / 8%), 0 16px 40px rgb(28 27 24 / 12%);
+  --shadow-focus: 0 0 0 3px color-mix(in srgb, var(--focus) 30%, transparent);
+
+  /* -- shape ------------------------------------------------------------- */
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --radius-full: 999px;
+
+  /* -- type -------------------------------------------------------------- */
+  --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.9375rem;
+  --text-md: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.375rem;
+
+  /* -- spacing ----------------------------------------------------------- */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+
+  /* -- motion ------------------------------------------------------------ */
+  --ease: cubic-bezier(0.2, 0, 0.2, 1);
+  --duration-fast: 120ms;
+  --duration: 180ms;
+
+  /* Comfortable on a tablet, which PRD §39 calls a primary reading target. */
+  --tap-target: 40px;
+}
+
+/* Dark: only the tokens that change are redefined, so nothing is defined for
+   the first time inside a media query. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #151417;
+    --surface: #1D1C20;
+    --surface-raised: #232228;
+    --surface-sunken: #111013;
+    --surface-hover: #26252C;
+
+    --border: #2E2C33;
+    --border-strong: #6E6978;
+
+    --text: #F2F0EC;
+    --text-secondary: #B3AEA6;
+    --text-tertiary: #8B8680;
+
+    --accent: #8E8CFF;
+    --accent-hover: #9E9CFF;
+    --accent-text: #A5A3FF;
+    --accent-soft: #24233A;
+    --on-accent: #14131A;
+
+    --danger: #FF8A80;
+    --danger-hover: #FF9E95;
+    --danger-text: #FF9E95;
+    --danger-soft: #35201F;
+    --on-danger: #1A0F0E;
+
+    --success: #6FD79B;
+    --success-soft: #16281E;
+    --warning: #E8B45C;
+    --warning-soft: #2E2415;
+
+    --focus: #8E8CFF;
+
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / 40%);
+    --shadow-md: 0 2px 8px rgb(0 0 0 / 45%);
+    --shadow-lg: 0 12px 32px rgb(0 0 0 / 55%);
+  }
+}
+
+/* An explicit choice wins over the system setting, in both directions. */
+:root[data-theme="dark"] {
+  --bg: #151417;
+  --surface: #1D1C20;
+  --surface-raised: #232228;
+  --surface-sunken: #111013;
+  --surface-hover: #26252C;
+
+  --border: #2E2C33;
+  --border-strong: #6E6978;
+
+  --text: #F2F0EC;
+  --text-secondary: #B3AEA6;
+  --text-tertiary: #8B8680;
+
+  --accent: #8E8CFF;
+  --accent-hover: #9E9CFF;
+  --accent-text: #A5A3FF;
+  --accent-soft: #24233A;
+  --on-accent: #14131A;
+
+  --danger: #FF8A80;
+  --danger-hover: #FF9E95;
+  --danger-text: #FF9E95;
+  --danger-soft: #35201F;
+  --on-danger: #1A0F0E;
+
+  --success: #6FD79B;
+  --success-soft: #16281E;
+  --warning: #E8B45C;
+  --warning-soft: #2E2415;
+
+  --focus: #8E8CFF;
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 40%);
+  --shadow-md: 0 2px 8px rgb(0 0 0 / 45%);
+  --shadow-lg: 0 12px 32px rgb(0 0 0 / 55%);
+}
