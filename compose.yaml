@@ -1,0 +1,133 @@
+# LumaIndex — production compose file.
+#
+#   docker compose up -d --build
+#
+# Nothing here is published beyond 127.0.0.1. Access reaches the host through
+# `tailscale serve`, which terminates TLS for the MagicDNS name and forwards to
+# Caddy on localhost. See deploy/bootstrap.sh.
+
+name: lumaindex
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-lumaindex}
+      POSTGRES_USER: ${POSTGRES_USER:-lumaindex}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      # Deterministic initdb settings; changing these later needs a dump/restore.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lumaindex} -d ${POSTGRES_DB:-lumaindex}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    # Not published. Reachable only from the compose network.
+    expose:
+      - "5432"
+
+  backend:
+    build:
+      context: ./backend
+    image: lumaindex-backend:${LUMA_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY is required}
+      DJANGO_DEBUG: ${DJANGO_DEBUG:-False}
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,backend}
+      DJANGO_CSRF_TRUSTED_ORIGINS: ${DJANGO_CSRF_TRUSTED_ORIGINS:-}
+      DJANGO_LOG_LEVEL: ${DJANGO_LOG_LEVEL:-INFO}
+      DJANGO_SESSION_COOKIE_SECURE: ${DJANGO_SESSION_COOKIE_SECURE:-True}
+      DJANGO_CSRF_COOKIE_SECURE: ${DJANGO_CSRF_COOKIE_SECURE:-True}
+      DJANGO_SESSION_COOKIE_AGE: ${DJANGO_SESSION_COOKIE_AGE:-1209600}
+      LUMA_PUBLIC_ORIGIN: ${LUMA_PUBLIC_ORIGIN:-}
+      LUMA_REGISTRATION_ENABLED: ${LUMA_REGISTRATION_ENABLED:-False}
+      POSTGRES_DB: ${POSTGRES_DB:-lumaindex}
+      POSTGRES_USER: ${POSTGRES_USER:-lumaindex}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      LUMA_FIELD_ENCRYPTION_KEY: ${LUMA_FIELD_ENCRYPTION_KEY:-}
+      LUMA_FIELD_ENCRYPTION_KEYS_LEGACY: ${LUMA_FIELD_ENCRYPTION_KEYS_LEGACY:-}
+      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
+      GOOGLE_OAUTH_REDIRECT_URI: ${GOOGLE_OAUTH_REDIRECT_URI:-}
+      GOOGLE_DRIVE_SCOPES: ${GOOGLE_DRIVE_SCOPES:-}
+      LUMA_EMAIL_BACKEND: ${LUMA_EMAIL_BACKEND:-console}
+      EMAIL_HOST: ${EMAIL_HOST:-}
+      EMAIL_PORT: ${EMAIL_PORT:-587}
+      EMAIL_HOST_USER: ${EMAIL_HOST_USER:-}
+      EMAIL_HOST_PASSWORD: ${EMAIL_HOST_PASSWORD:-}
+      EMAIL_USE_TLS: ${EMAIL_USE_TLS:-True}
+      DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-lumaindex@localhost}
+      LUMA_PDF_CACHE_DIR: /data/pdf-cache
+      LUMA_THUMBNAIL_DIR: /data/thumbnails
+      LUMA_PDF_CACHE_MAX_BYTES: ${LUMA_PDF_CACHE_MAX_BYTES:-10737418240}
+      GUNICORN_WORKERS: ${GUNICORN_WORKERS:-3}
+      GUNICORN_TIMEOUT: ${GUNICORN_TIMEOUT:-120}
+      DJANGO_SUPERUSER_EMAIL: ${DJANGO_SUPERUSER_EMAIL:-}
+      DJANGO_SUPERUSER_PASSWORD: ${DJANGO_SUPERUSER_PASSWORD:-}
+    volumes:
+      - pdf-cache:/data/pdf-cache
+      - thumbnails:/data/thumbnails
+    expose:
+      - "8000"
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+  frontend:
+    build:
+      context: ./frontend
+    image: lumaindex-frontend:${LUMA_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      NUXT_API_INTERNAL_BASE: http://backend:8000
+      NUXT_PUBLIC_API_BASE: /api
+    expose:
+      - "3000"
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      frontend:
+        condition: service_healthy
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    ports:
+      # 127.0.0.1 on purpose: `tailscale serve` is the only thing that reaches
+      # this. Changing it to 0.0.0.0 exposes the app to every network the host
+      # is on, including the public internet if it has a routable address.
+      - "${LUMA_BIND_ADDRESS:-127.0.0.1}:${CADDY_HTTP_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8080/api/health/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+volumes:
+  postgres-data:
+  pdf-cache:
+  thumbnails:
+  caddy-data:
+  caddy-config:

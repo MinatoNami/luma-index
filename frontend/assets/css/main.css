@@ -1,0 +1,87 @@
+/* Minimal design tokens. Phase 3 replaces this with the real library UI. */
+:root {
+  color-scheme: light dark;
+  --bg: #fbfbfd;
+  --surface: #ffffff;
+  --border: #e3e3e8;
+  --text: #1c1c22;
+  --muted: #6b6b78;
+  --accent: #3b5bdb;
+  --danger: #c92a2a;
+  --radius: 10px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #131317;
+    --surface: #1c1c22;
+    --border: #2e2e38;
+    --text: #ecedf1;
+    --muted: #9a9aa8;
+    --accent: #748ffc;
+    --danger: #ff8787;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--accent); }
+
+/* PRD §40: focus must stay visible for keyboard users. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+}
+
+label { display: block; font-size: 0.875rem; color: var(--muted); margin-bottom: 0.35rem; }
+
+input[type="email"], input[type="password"], input[type="text"] {
+  width: 100%;
+  padding: 0.7rem 0.8rem;
+  font-size: 1rem;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+button {
+  font: inherit;
+  padding: 0.7rem 1rem;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  /* PRD §40: comfortable touch target on tablet/mobile. */
+  min-height: 44px;
+}
+
+button[disabled] { opacity: 0.6; cursor: not-allowed; }
+
+button.secondary { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+
+.error {
+  color: var(--danger);
+  font-size: 0.9rem;
+  margin: 0.75rem 0 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

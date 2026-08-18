@@ -1,0 +1,9 @@
+# Major-version ranges. Reproducibility comes from the built image, which is
+# tagged per release and kept on the server for rollback.
+Django>=5.2,<5.3                 # 5.2 is the current LTS
+djangorestframework>=3.16,<4
+drf-spectacular>=0.28,<0.29
+psycopg[binary]>=3.2,<4
+gunicorn>=23,<24
+cryptography>=42                 # Fernet, for OAuth refresh-token encryption
+whitenoise>=6.7,<7               # serves Django Admin static files

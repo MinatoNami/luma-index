@@ -10,12 +10,51 @@ Designed to run on an Ubuntu server behind Tailscale, and to be read from deskto
 
 ## Status
 
-**Pre-implementation.** This repository currently contains the product requirements only — no application code has been written yet.
+**Phase 1 — platform foundation — is built and deployable.** Everything from
+Phase 2 onward (Google Drive, the library, the reader) is still to come.
 
-- [lumaindex-prd.md](lumaindex-prd.md) — the full PRD, and the source of truth for scope and behaviour.
-- This README summarizes that PRD. Where the two disagree, the PRD wins.
+Working today: Docker Compose stack, PostgreSQL, Django + DRF with a custom
+user model, session-cookie authentication, Django Admin, an OpenAPI schema, a
+Nuxt frontend with sign-in, and a one-command SSH deploy to Ubuntu behind
+Tailscale.
 
-Phase 1 (platform foundation) is the next piece of work. See [Roadmap](#roadmap).
+- [lumaindex-prd.md](lumaindex-prd.md) — the full PRD, and the source of truth
+  for scope and behaviour. Where this README and the PRD disagree, the PRD wins.
+- [docs/deployment.md](docs/deployment.md) — deploying, backups, troubleshooting.
+- [docs/google-oauth.md](docs/google-oauth.md) — **read before Phase 2.** The
+  Drive scope decision has consequences that are expensive to reverse.
+- [docs/open-questions.md](docs/open-questions.md) — gaps the PRD leaves open,
+  with the decision each one needs and when it has to be made.
+
+---
+
+## Quick start
+
+Local:
+
+```bash
+cp .env.example .env && docker compose -f compose.yaml -f compose.dev.yaml up --build
+```
+
+To the server:
+
+```bash
+cp deploy/deploy.env.example deploy/deploy.env   # where to deploy
+```
+
+```bash
+./deploy/deploy.sh bootstrap                      # one-time server prep
+```
+
+```bash
+cp .env.example .env && $EDITOR .env              # fill in every CHANGE_ME
+```
+
+```bash
+./deploy/deploy.sh env:push && ./deploy/deploy.sh
+```
+
+Full walkthrough in [docs/deployment.md](docs/deployment.md).
 
 ---
 
@@ -87,19 +126,27 @@ Every PDF byte a reader receives passes through Django's authorization boundary.
 
 ---
 
-## Planned repository layout
+## Repository layout
+
+Built (✅) and planned (·):
 
 ```text
 backend/
-├── config/                  # Django project settings
-├── accounts/                # users, auth, account linking, roles
+├── config/                  ✅ Django settings, URLs, WSGI/ASGI
+├── common/                  ✅ structured logging + credential redaction,
+│                               encrypted model fields
+├── accounts/                ✅ custom user, session auth, admin
+├── api/                     ✅ DRF routing, health probes, OpenAPI
 ├── integrations/
-│   └── google_drive/        # OAuth, connections, folder selection, sync
-├── library/                 # books, book sources, collections, metadata
-├── reader/                  # progress, bookmarks, highlights, notes, prefs
-├── sharing/                 # visibility, shared library, access rules
-└── api/                     # DRF routing and API composition
-frontend/                    # Nuxt 3 application
+│   └── google_drive/        ·  OAuth, connections, folder selection, sync
+├── library/                 ·  books, book sources, collections, metadata
+├── reader/                  ·  progress, bookmarks, highlights, notes, prefs
+└── sharing/                 ·  visibility, shared library, access rules
+
+frontend/                    ✅ Nuxt 3 — auth, CSRF, SSR cookie forwarding
+caddy/                       ✅ reverse proxy (single origin for app + API)
+deploy/                      ✅ bootstrap.sh, deploy.sh
+docs/                        ✅ deployment, Google OAuth
 ```
 
 Django apps should stay loosely coupled.
@@ -167,7 +214,14 @@ Object-level permissions apply to API endpoints, PDF streaming, cache access, th
 
 Docker Compose on Ubuntu, initially three services — `frontend`, `backend`, `postgres` — with persistent volumes for `postgres-data`, `pdf-cache`, and `thumbnails`. Access is expected to go through Tailscale; no public internet exposure is required beyond outbound access for Google APIs and OAuth.
 
-The repository will ship `docker-compose.yml`, `.env.example`, migrations, health checks, restart policies, and documented setup, upgrade, and backup/restore procedures. **None of these exist yet** — they land with Phase 1.
+`compose.yaml`, `.env.example`, migrations, health checks, restart policies,
+and the setup/upgrade/backup procedures all ship in this repo — see
+[docs/deployment.md](docs/deployment.md).
+
+Nothing is published past `127.0.0.1`: `tailscale serve` terminates TLS for the
+MagicDNS name and forwards to Caddy on loopback, so the app has a real
+certificate (and therefore working `Secure` cookies) without exposing a port to
+the LAN or the internet.
 
 **Backups:** PostgreSQL holds the irreplaceable data (users, library metadata, collections, sharing, progress, bookmarks, highlights, notes, settings). The PDF cache and thumbnails are regenerable and do not need routine backup.
 
@@ -177,7 +231,7 @@ The repository will ship `docker-compose.yml`, `.env.example`, migrations, healt
 
 | Phase | Scope |
 | --- | --- |
-| 1 — Platform foundation | Docker Compose, PostgreSQL, Django + DRF, custom User model, Nuxt, authentication, Django Admin, Tailscale deployment |
+| 1 — Platform foundation ✅ | Docker Compose, PostgreSQL, Django + DRF, custom User model, Nuxt, authentication, Django Admin, Tailscale deployment |
 | 2 — Google Drive | Account linking, Drive OAuth, connection model, root folder selection, recursive PDF discovery, initial sync, PDF cache, thumbnails |
 | 3 — Library | Grid/list views, imported Drive hierarchy, search, sort, filters, nested collections, Favourites, Continue Reading, Unsorted |
 | 4 — PDF reader | PDF.js, navigation, continuous/single-page modes, zoom, in-document search, table of contents, page thumbnails, preferences, progress sync |
