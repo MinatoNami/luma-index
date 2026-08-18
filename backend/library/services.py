@@ -118,8 +118,10 @@ def process_zip_batch(batch: UploadBatch, *, storage: LibraryStorage | None = No
     errors: list[str] = []
 
     try:
-        if not archive.exists():
-            raise ZipImportError("The staged upload is no longer on disk.")
+        # `Path("")` is `Path(".")`, which exists — so an empty staged_path would
+        # otherwise reach zipfile and surface as "Is a directory: '.'".
+        if not batch.staged_path or not archive.is_file():
+            raise ZipImportError("The uploaded archive is no longer on disk.")
         result = scan(archive)
     except (ZipImportError, OSError) as exc:
         batch.status = UploadBatch.Status.FAILED

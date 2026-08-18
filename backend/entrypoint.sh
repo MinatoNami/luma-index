@@ -34,6 +34,25 @@ except Exception as exc:
 done
 log "postgres is reachable"
 
+# --- Storage -----------------------------------------------------------------
+# A named volume whose mount point does not exist in the image is created by
+# Docker as root, leaving this container unable to write to it. That surfaces
+# as a 500 on the first upload rather than at boot, so check it here: a
+# misconfiguration that cannot self-heal should stop the container, not wait
+# to be discovered by a user.
+for dir in "${LUMA_LIBRARY_DIR:-/data/library}" \
+           "${LUMA_THUMBNAIL_DIR:-/data/thumbnails}" \
+           "${LUMA_UPLOAD_STAGING_DIR:-/data/staging}"; do
+    mkdir -p "$dir" 2>/dev/null || true
+    if [ ! -w "$dir" ]; then
+        log "FATAL: $dir is not writable by $(id -un) (uid $(id -u))"
+        log "The volume mount point is probably missing from the image. Its"
+        log "owner is: $(stat -c '%U:%G' "$dir" 2>/dev/null || echo unknown)"
+        exit 1
+    fi
+done
+log "storage directories are writable"
+
 # --- Schema ------------------------------------------------------------------
 # Migrations run before the new code serves traffic. If this fails the container
 # exits non-zero, compose reports it unhealthy, and deploy.sh rolls back rather

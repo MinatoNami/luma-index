@@ -427,3 +427,15 @@ def test_trashing_a_folder_hides_its_books(api, user):
     assert api.get(reverse("library:books")).json() == []
     assert post(api, "library:folder-restore", args=[folder.pk]).status_code == 200
     assert len(api.get(reverse("library:books")).json()) == 2
+
+
+@pytest.mark.django_db
+def test_a_batch_with_no_staged_file_fails_clearly(user):
+    """An empty staged_path must not reach zipfile as the current directory."""
+    batch = UploadBatch.objects.create(owner=user, original_filename="gone.zip",
+                                       staged_path="")
+    process_zip_batch(batch)
+
+    assert batch.status == UploadBatch.Status.FAILED
+    assert "no longer on disk" in batch.error_summary
+    assert "Is a directory" not in batch.error_summary

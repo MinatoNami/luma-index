@@ -29,7 +29,11 @@ COPY --chown=app:app . /app
 # Pre-creating these in the image means a *named volume* mounted here inherits
 # app:app ownership on first creation. A bind mount does not — chown it on the
 # host yourself if you switch to one.
-RUN mkdir -p /data/pdf-cache /data/thumbnails /app/staticfiles \
+#
+# These paths must match the volume mounts in compose.yaml. If they drift,
+# Docker creates the mount point as root and every write fails at runtime;
+# entrypoint.sh checks for exactly that before starting.
+RUN mkdir -p /data/library /data/thumbnails /data/staging /app/staticfiles \
  && chown -R app:app /data /app/staticfiles
 
 USER app
