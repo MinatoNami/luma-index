@@ -25,6 +25,8 @@ Tailscale.
   Drive scope decision has consequences that are expensive to reverse.
 - [docs/open-questions.md](docs/open-questions.md) — gaps the PRD leaves open,
   with the decision each one needs and when it has to be made.
+- [docs/phases/](docs/phases/) — Phases 2–7 scoped: data models, APIs, risks,
+  and the decisions to settle before writing each one.
 
 ---
 
@@ -232,12 +234,15 @@ the LAN or the internet.
 | Phase | Scope |
 | --- | --- |
 | 1 — Platform foundation ✅ | Docker Compose, PostgreSQL, Django + DRF, custom User model, Nuxt, authentication, Django Admin, Tailscale deployment |
-| 2 — Google Drive | Account linking, Drive OAuth, connection model, root folder selection, recursive PDF discovery, initial sync, PDF cache, thumbnails |
-| 3 — Library | Grid/list views, imported Drive hierarchy, search, sort, filters, nested collections, Favourites, Continue Reading, Unsorted |
-| 4 — PDF reader | PDF.js, navigation, continuous/single-page modes, zoom, in-document search, table of contents, page thumbnails, preferences, progress sync |
-| 5 — Reading data | Bookmarks, highlights, notes |
-| 6 — Sharing | Private/shared visibility, Shared Library, non-Google reader access, authorized PDF streaming, per-user state on shared books |
-| 7 — Hardening | Security review, object-level permission tests, OAuth failure handling, resync/recovery, cache limits, large-PDF testing, backup/restore testing, mobile and tablet UX |
+| [2 — Google Drive](docs/phases/02-google-drive.md) | Account linking, Drive OAuth, connection model, root folder selection, recursive PDF discovery, initial sync, PDF cache, thumbnails |
+| [3 — Library](docs/phases/03-library.md) | Grid/list views, imported Drive hierarchy, search, sort, filters, nested collections, Favourites, Continue Reading, Unsorted |
+| [4 — PDF reader](docs/phases/04-reader.md) | PDF.js, navigation, continuous/single-page modes, zoom, in-document search, table of contents, page thumbnails, preferences, progress sync |
+| [5 — Reading data](docs/phases/05-reading-data.md) | Bookmarks, highlights, notes |
+| [6 — Sharing](docs/phases/06-sharing.md) | Private/shared visibility, Shared Library, non-Google reader access, authorized PDF streaming, per-user state on shared books |
+| [7 — Hardening](docs/phases/07-hardening.md) | Security review, object-level permission tests, OAuth failure handling, resync/recovery, cache limits, large-PDF testing, backup/restore testing, mobile and tablet UX |
+
+Each phase is scoped in [docs/phases/](docs/phases/), including the six
+decisions that outlive their phase and should be settled early.
 
 The MVP is judged against the 31 success criteria in [§45 of the PRD](lumaindex-prd.md).
 
