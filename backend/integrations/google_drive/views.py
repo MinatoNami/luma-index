@@ -22,13 +22,14 @@ from library.models import Book
 from . import oauth
 from .client import DriveClient
 from .errors import DriveAuthError, DriveError
-from .models import DriveConnection, DriveRoot
+from .models import DriveConnection, DriveRoot, SyncRun
 from .serializers import (
     AddRootSerializer,
     DisconnectSerializer,
     DriveConnectionSerializer,
     DriveFolderSerializer,
     DriveRootSerializer,
+    SyncRunSerializer,
 )
 
 logger = logging.getLogger("lumaindex.drive")
@@ -259,3 +260,58 @@ class DriveRootDetailView(APIView):
         # doing so would take annotations with them for a settings change.
         root.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@csrf_required
+class DriveSyncView(APIView):
+    """Request a sync, and read recent runs.
+
+    Requesting does not run anything inline: a first import of a large library
+    takes minutes and would exceed the request timeout. It sets a flag the sync
+    worker picks up within its poll interval, and the client polls this endpoint
+    for progress (docs/phases/02-google-drive.md D3).
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(summary="Recent sync runs", responses={200: SyncRunSerializer(many=True)})
+    def get(self, request):
+        connection = _connection_for(request.user)
+        if connection is None:
+            return Response({"detail": "No Drive connection."},
+                            status=status.HTTP_404_NOT_FOUND)
+        runs = connection.sync_runs.all()[:20]
+        return Response({
+            "sync_requested_at": connection.sync_requested_at,
+            "last_synced_at": connection.last_synced_at,
+            "runs": SyncRunSerializer(runs, many=True).data,
+        })
+
+    @extend_schema(summary="Request a sync", request=None,
+                   responses={202: OpenApiResponse(description="Sync requested")})
+    def post(self, request):
+        connection = _connection_for(request.user)
+        if connection is None:
+            return Response({"detail": "No Drive connection."},
+                            status=status.HTTP_404_NOT_FOUND)
+        if connection.needs_reauthorization:
+            return Response({"detail": "Drive authorization expired. Reconnect to continue.",
+                             "code": "reauthorization_required"},
+                            status=status.HTTP_409_CONFLICT)
+
+        connection.request_sync()
+        return Response({"sync_requested_at": connection.sync_requested_at},
+                        status=status.HTTP_202_ACCEPTED)
+
+
+class DriveSyncDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(summary="One sync run", responses={200: SyncRunSerializer})
+    def get(self, request, run_id: int):
+        run = SyncRun.objects.filter(
+            pk=run_id, drive_connection__user=request.user
+        ).first()
+        if run is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        return Response(SyncRunSerializer(run).data)

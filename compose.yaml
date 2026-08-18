@@ -38,7 +38,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    environment:
+    environment: &backend-env
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY is required}
       DJANGO_DEBUG: ${DJANGO_DEBUG:-False}
       DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,backend}
@@ -83,6 +83,30 @@ services:
       - thumbnails:/data/thumbnails
     expose:
       - "8000"
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+  # Drive syncing runs here rather than inside a request: a first import of a
+  # large library takes minutes and would exceed the request timeout. A loop
+  # claiming work with a Postgres advisory lock keeps Redis and Celery out of
+  # the stack until an async workload actually justifies them (PRD §36).
+  worker:
+    build:
+      context: ./backend
+    image: lumaindex-backend:${LUMA_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment: *backend-env
+    entrypoint: ["python", "manage.py", "run_sync_worker"]
+    volumes:
+      - pdf-cache:/data/pdf-cache
+      - thumbnails:/data/thumbnails
+    # SIGTERM lets it finish the connection in flight instead of leaving a
+    # SyncRun stuck in 'running'.
+    stop_grace_period: 60s
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "5" }
