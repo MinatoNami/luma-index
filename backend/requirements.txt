@@ -10,3 +10,4 @@ whitenoise>=6.7,<7               # serves Django Admin static files
 httpx>=0.27,<0.29                # Drive REST + OAuth token calls
 google-auth>=2.35,<3             # ID token verification (the email_verified check)
 pypdfium2>=4.30,<5               # thumbnails, page count, text-layer probe (Apache-2.0)
+Pillow>=10,<12                   # encodes the rendered thumbnail
