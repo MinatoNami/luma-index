@@ -60,6 +60,7 @@ function hostFor(number: number): HTMLElement | undefined {
 }
 const loading = ref(true)
 const failed = ref('')
+const pageError = ref('')
 
 const total = ref(props.pageCount || 0)
 const current = ref((props.initialPage ?? 0) + 1)
@@ -121,7 +122,11 @@ async function renderPage(number: number) {
     await paintHighlights(number)
   } catch (error: any) {
     rendered.delete(number)
-    emit('error', error?.message || 'A page failed to render.')
+    // Shown, not just emitted. A page that silently fails to render is
+    // indistinguishable from one that is still loading, which cost real time
+    // to diagnose once already.
+    pageError.value = error?.message || 'A page failed to render.'
+    emit('error', pageError.value)
   } finally {
     // A render that lands after the last scroll pass still has to be paid for.
     scheduleBudget()
@@ -519,10 +524,11 @@ onBeforeUnmount(() => resizeObserver?.disconnect())
 </script>
 
 <template>
-  <div ref="viewport" class="viewport" @scroll.passive="onScroll"
+  <div ref="viewport" class="viewport"
+       @scroll.passive="onScroll"
        @mouseup="onSelectionEnd" @touchend="onSelectionEnd">
-    <p v-if="failed" class="notice notice-error" role="alert">
-      <AppIcon name="warning" :size="17" /> {{ failed }}
+    <p v-if="failed || pageError" class="notice notice-error" role="alert">
+      <AppIcon name="warning" :size="17" /> {{ failed || pageError }}
     </p>
 
     <div v-else class="pages" :class="props.mode">
