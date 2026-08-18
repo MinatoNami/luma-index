@@ -440,7 +440,9 @@ cmd_down() {
 }
 
 usage() {
-    sed -n '3,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    # Print the header comment block and stop at the first line that is not a
+    # comment, so the help text cannot drift out of sync with the script.
+    awk 'NR>2 { if ($0 !~ /^#/) exit; sub(/^# ?/, ""); print }' "${BASH_SOURCE[0]}"
 }
 
 # --------------------------------------------------------------------------- #
