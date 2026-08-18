@@ -207,6 +207,20 @@ if not DEBUG:
     SECURE_HSTS_SECONDS = env_int("DJANGO_SECURE_HSTS_SECONDS", 0)
     SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool("DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS", False)
 
+# Two `check --deploy` warnings are expected on this deployment and are not
+# oversights:
+#
+#   security.W008 (SECURE_SSL_REDIRECT) — nothing reaches Django over plain
+#     HTTP. Caddy is bound to loopback and `tailscale serve` terminates TLS in
+#     front of it, so a redirect here would have nothing to redirect.
+#   security.W021 (SECURE_HSTS_PRELOAD) — the browser preload list is for
+#     public domains. A MagicDNS name on a private tailnet cannot be submitted
+#     to it, and should not be.
+#
+# W005 (HSTS subdomains) is a real choice: set
+# DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS once you are sure every subdomain is
+# HTTPS-only.
+
 
 # --------------------------------------------------------------------------- #
 # Django REST Framework

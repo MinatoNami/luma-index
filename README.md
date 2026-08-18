@@ -69,7 +69,7 @@ pixels on a page has to be checked in a real browser.
 | **Per-user storage quotas** | There is a global maximum upload size and a free-disk floor, but nothing stops one account filling the disk. Fine for a household; needed before strangers share an instance. |
 | **Moving items to an arbitrary folder** | The row menu offers "move up one level" only. No folder picker and no drag-onto-folder, which is the main place this still feels less capable than Drive. |
 | **Real email delivery** | Password reset works, but the console backend prints reset links into the backend log. Anyone who can read logs can take over any account, so point `LUMA_EMAIL_BACKEND` at an SMTP relay before a second person has an account. |
-| **Off-box backups, and a restore drill** | `deploy.sh backup` writes to the same host it is backing up. That covers "I broke the database", not "the disk died". A restore has never been rehearsed. |
+| **Off-box backups** | `deploy.sh backup` writes to the same host it is backing up. That covers "I broke the database", not "the disk died" — copy dumps and the `library` volume somewhere else on a schedule. The restore procedure itself has now been rehearsed against a scratch database and is written up in [docs/deployment.md](docs/deployment.md#the-restore-drill). |
 | **Emptying the trash automatically** | Trashed items stay until deleted by hand. |
 | **Sharing with named people or groups** | §16 keeps the MVP to private or shared-with-everyone-signed-in. The richer model is §43 future work; it would change `library/permissions.py` and nothing else. |
 | **Collections and favourites** | Phase 3's remaining half. Search, sort, and the three views exist; the many-to-many layer does not. |

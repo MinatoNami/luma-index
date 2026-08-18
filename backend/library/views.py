@@ -47,6 +47,7 @@ from .serializers import (
     ReadingProgressSerializer,
     SharedBookSerializer,
     UploadBatchSerializer,
+    UploadRequestSerializer,
 )
 from .services import IngestError, store_upload
 from .storage import InsufficientSpace, LibraryStorage
@@ -381,7 +382,9 @@ class UploadView(OwnedMixin, APIView):
 
     @extend_schema(
         summary="Upload PDFs or a ZIP archive",
-        responses={201: OpenApiResponse(description="Imported books, or a queued batch")},
+        request=UploadRequestSerializer,
+        responses={201: OpenApiResponse(description="Imported books, or a queued batch"),
+                   507: OpenApiResponse(description="Not enough disk space")},
     )
     def post(self, request):
         folder = None

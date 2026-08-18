@@ -125,10 +125,11 @@ LumaIndex is the only place they exist, unless the user still has the original
 upload. A database dump alone restores an empty library that knows the names of
 books nobody can open.
 
-So back up the volume too:
+So back up the volume too. This form needs no `sudo` and no knowledge of where
+Docker keeps its volumes:
 
 ```bash
-ssh USER@HOST "sudo tar -C /var/lib/docker/volumes/lumaindex_library -czf - ." > library.tar.gz
+ssh USER@HOST "docker run --rm -v lumaindex_library:/src:ro alpine tar -C /src -czf - ." > library.tar.gz
 ```
 
 Thumbnails and staging need no backup: thumbnails re-render from the PDFs, and
@@ -137,15 +138,49 @@ staging holds only in-flight uploads.
 This is a change from the Drive-backed design, where the local copy was a cache
 and PRD §38 correctly said not to back it up. Owning the storage inverts that.
 
-A restore you have never tested is a hypothesis. Test it:
+### The restore drill
+
+A restore you have never performed is a hypothesis. Rehearse it against a
+scratch database rather than the live one, so a mistake during the rehearsal
+costs nothing.
+
+Take the dump:
 
 ```bash
-./deploy/deploy.sh backup --download
+docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists' | gzip -c > drill.sql.gz
+```
+
+Restore it beside the real database:
+
+```bash
+docker compose exec -T postgres sh -c 'dropdb -U "$POSTGRES_USER" --if-exists restore_drill && createdb -U "$POSTGRES_USER" restore_drill'
 ```
 
 ```bash
-./deploy/deploy.sh restore backups/lumaindex-<timestamp>.sql.gz
+gunzip -c drill.sql.gz | docker compose exec -T postgres sh -c 'psql -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d restore_drill'
 ```
+
+Compare the row counts against the live database — users, folders, books,
+sources, highlights, reading progress:
+
+```bash
+docker compose exec -T postgres sh -c 'psql -t -A -U "$POSTGRES_USER" -d restore_drill -c "SELECT count(*) FROM library_book;"'
+```
+
+Then check that the storage keys in the restored rows correspond to files in
+the `library` volume. That is the step that catches the failure this whole
+section is about: a dump restores the *catalogue*, and without the volume every
+book in it is unopenable.
+
+Finally, drop the scratch database:
+
+```bash
+docker compose exec -T postgres sh -c 'dropdb -U "$POSTGRES_USER" restore_drill'
+```
+
+Restoring over the live database, when you actually need to, is
+`./deploy/deploy.sh restore <file>` — which stops the app first and asks for
+typed confirmation.
 
 ## Local development
 

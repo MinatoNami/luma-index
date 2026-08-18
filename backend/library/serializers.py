@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from .annotations import validate_position_data
@@ -67,6 +68,20 @@ class FolderSerializer(serializers.ModelSerializer):
         return value
 
 
+class ProgressSummarySerializer(serializers.Serializer):
+    """The shape embedded in a book listing.
+
+    Declared so the published OpenAPI schema describes it, rather than
+    defaulting an untyped SerializerMethodField to "string" — which makes the
+    schema wrong for every client generated from it (PRD §31).
+    """
+
+    page = serializers.IntegerField()
+    page_fraction = serializers.FloatField()
+    percentage = serializers.FloatField()
+    last_opened_at = serializers.DateTimeField(allow_null=True)
+
+
 class BookSourceSerializer(serializers.ModelSerializer):
     class Meta:
         model = BookSource
@@ -109,9 +124,11 @@ class SharedBookSerializer(serializers.ModelSerializer):
                   "thumbnail_path", "owner_name", "progress", "created_at")
         read_only_fields = fields
 
+    @extend_schema_field(serializers.CharField())
     def get_owner_name(self, obj) -> str:
         return obj.owner.display_name or obj.owner.email.split("@")[0]
 
+    @extend_schema_field(ProgressSummarySerializer(allow_null=True))
     def get_progress(self, obj):
         records = getattr(obj, "_reader_progress", None)
         if not records:
@@ -134,6 +151,7 @@ class BookSerializer(serializers.ModelSerializer):
         read_only_fields = ("id", "path", "page_count", "has_text_layer", "thumbnail_path",
                             "source", "progress", "deleted_at", "created_at", "updated_at")
 
+    @extend_schema_field(ProgressSummarySerializer(allow_null=True))
     def get_progress(self, obj):
         """Attached by the list view's prefetch; None when never opened."""
         records = getattr(obj, "_reader_progress", None)
@@ -205,3 +223,13 @@ class PageNoteSerializer(serializers.ModelSerializer):
         if not body:
             raise serializers.ValidationError("A note needs some text.")
         return body[:20000]
+
+
+class UploadRequestSerializer(serializers.Serializer):
+    """Multipart upload body, for the schema."""
+
+    files = serializers.ListField(
+        child=serializers.FileField(),
+        help_text="One or more PDFs, or a ZIP archive of them.",
+    )
+    folder = serializers.IntegerField(required=False, help_text="Target folder; root if omitted.")
