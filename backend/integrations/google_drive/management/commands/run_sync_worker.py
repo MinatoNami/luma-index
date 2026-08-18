@@ -12,8 +12,10 @@ becomes a Celery task later without the domain code changing.
 from __future__ import annotations
 
 import logging
+import os
 import signal
 import time
+from pathlib import Path
 
 from django.core.management.base import BaseCommand
 from django.db import connection as db_connection
@@ -28,6 +30,12 @@ from integrations.google_drive.sync import (
 )
 
 logger = logging.getLogger("lumaindex.drive.worker")
+
+# Touched after every pass. The container healthcheck reads its mtime, so a
+# loop that wedges on a hung call is restarted rather than sitting there
+# looking fine because the process is technically alive.
+HEARTBEAT_PATH = Path(os.environ.get("LUMA_WORKER_HEARTBEAT",
+                                     "/tmp/lumaindex-sync-worker.heartbeat"))  # noqa: S108
 
 POLL_SECONDS = 15
 SYNC_INTERVAL_MINUTES = 60
@@ -60,6 +68,7 @@ class Command(BaseCommand):
 
         poll = options["poll_seconds"]
         interval = options["interval_minutes"]
+        self.beat()
         logger.info("sync worker started",
                     extra={"event": "drive.worker.started", "poll_seconds": poll,
                            "interval_minutes": interval})
@@ -78,6 +87,7 @@ class Command(BaseCommand):
                 # A long-lived process must not hold a connection Postgres has
                 # already closed underneath it.
                 db_connection.close_if_unusable_or_obsolete()
+                self.beat()
 
             if options["once"]:
                 return
@@ -93,6 +103,16 @@ class Command(BaseCommand):
         logger.info("sync worker stopped", extra={"event": "drive.worker.stopped"})
 
     # ---------------------------------------------------------------- #
+
+    def beat(self) -> None:
+        try:
+            HEARTBEAT_PATH.parent.mkdir(parents=True, exist_ok=True)
+            HEARTBEAT_PATH.touch()
+        except OSError:
+            # A missing heartbeat costs a restart, not correctness; never let
+            # it take down a working loop.
+            logger.warning("could not write worker heartbeat",
+                           extra={"event": "drive.worker.heartbeat_failed"})
 
     def due_connections(self, interval_minutes: int):
         """Connections a user asked to sync, or that have gone stale.

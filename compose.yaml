@@ -104,6 +104,16 @@ services:
     volumes:
       - pdf-cache:/data/pdf-cache
       - thumbnails:/data/thumbnails
+    # The image's healthcheck curls the API, which this container does not
+    # serve. Watch the loop's heartbeat instead, so a worker wedged on a hung
+    # call is restarted rather than passing because the process still exists.
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import os,sys,time; p='/tmp/lumaindex-sync-worker.heartbeat'; sys.exit(0 if os.path.exists(p) and time.time()-os.path.getmtime(p) < 180 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     # SIGTERM lets it finish the connection in flight instead of leaving a
     # SyncRun stuck in 'running'.
     stop_grace_period: 60s

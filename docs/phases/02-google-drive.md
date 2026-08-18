@@ -6,6 +6,12 @@ Django's authorization boundary — never straight from Drive to the browser.
 
 **Unblocks:** everything. Phases 3–6 all assume `Book` and `BookSource` exist.
 
+**Status:** backend complete — models, Drive client, OAuth, sync, worker, cache,
+and thumbnails, with 155 tests. Built for the API-driven folder browse, which is
+identical under OAuth routes 1 and 2; route 3 (`drive.file` + Picker) would
+change only the folder-selection UI. Not yet exercised against real Google
+credentials — D1 is still open.
+
 ---
 
 ## Decide before writing code

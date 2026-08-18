@@ -7,7 +7,7 @@ which of the 31 MVP success criteria (§45) it proves.
 | Phase | Status | Document |
 | --- | --- | --- |
 | 1 — Platform foundation | **Built** | see the repository and [deployment.md](../deployment.md) |
-| 2 — Google Drive | Scoped | [02-google-drive.md](02-google-drive.md) |
+| 2 — Google Drive | **Backend built** | [02-google-drive.md](02-google-drive.md) |
 | 3 — Library | Scoped | [03-library.md](03-library.md) |
 | 4 — PDF reader | Scoped | [04-reader.md](04-reader.md) |
 | 5 — Bookmarks, highlights, notes | Scoped | [05-reading-data.md](05-reading-data.md) |

@@ -21,8 +21,8 @@ const { data: health } = await useAsyncData('health', () =>
     <section class="panel">
       <h2>Phase 1 — platform foundation</h2>
       <p>
-        Authentication, the API, and the database are wired up. The library,
-        Drive import, and the reader arrive in phases 2–4.
+        Authentication, the API, the database, and Google Drive import are wired
+        up. The library views and the reader arrive in phases 3–4.
       </p>
       <dl>
         <dt>Backend</dt>
@@ -33,6 +33,7 @@ const { data: health } = await useAsyncData('health', () =>
         </template>
       </dl>
       <p class="links">
+        <NuxtLink to="/settings/drive">Google Drive</NuxtLink>
         <a href="/api/docs/">API documentation</a>
         <a v-if="user?.is_staff" href="/admin/">Django Admin</a>
       </p>
