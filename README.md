@@ -52,7 +52,14 @@ of it has to be rediscovered.
 
 | What | Why it is unverified |
 | --- | --- |
-| **The annotation UI**, partly | Creating highlights is confirmed working in a real browser. Removing, recolouring and note-editing were added afterwards and have not been exercised there yet. The development preview pane cannot test any of it: PDF.js drives its render loop with `requestAnimationFrame`, and the pane runs with `document.visibilityState: 'hidden'`, where rAF never fires — so a render never completes and nothing downstream of it runs. |
+| **The annotation UI**, partly | Creating highlights is confirmed working in a real browser. Removing, recolouring and note-editing were added afterwards and have not been exercised there yet. |
+| **Single-page mode painting** | Page navigation in single-page mode is fixed and verified as far as this environment allows: the page element is replaced correctly and the counter tracks it. Whether the new page actually *paints* still needs a real browser. |
+
+Both of the above share one cause: the development preview pane cannot render
+PDFs at all. PDF.js drives its render loop with `requestAnimationFrame`, and the
+pane runs with `document.visibilityState: 'hidden'`, where rAF never fires — so
+a render never completes and nothing downstream of it runs. Anything that needs
+pixels on a page has to be checked in a real browser.
 | **The reader on a tablet** | PRD §39 calls tablet a primary reading target. Touch selection and memory behaviour have only been checked on a desktop browser. |
 
 ### Missing on purpose, for now

@@ -50,8 +50,19 @@ const viewport = ref<HTMLElement | null>(null)
 const hosts = new Map<number, HTMLElement>()
 
 function registerHost(number: number, el: Element | null) {
-  if (el instanceof HTMLElement) hosts.set(number, el)
-  else hosts.delete(number)
+  if (el instanceof HTMLElement) {
+    hosts.set(number, el)
+    return
+  }
+  // The element is gone, so whatever was drawn on it is gone too. Leaving the
+  // page in `rendered` made renderPage return early the next time it was
+  // needed — in single-page mode, where changing page replaces the element,
+  // that meant a page could never be drawn again once left.
+  hosts.delete(number)
+  if (rendered.has(number)) {
+    rendered.delete(number)
+    renderer?.cancel(number)
+  }
 }
 
 function hostFor(number: number): HTMLElement | undefined {
@@ -339,21 +350,36 @@ function onScroll() {
   })
 }
 
-function goTo(page: number, fraction = 0) {
+async function goTo(page: number, fraction = 0) {
   const clamped = Math.min(Math.max(1, page), total.value)
   current.value = clamped
+
   if (props.mode === 'single') {
-    renderPage(clamped)
+    // Reported before the render, not after: the reader is on this page
+    // whether or not it has finished painting, and waiting meant a slow or
+    // failed render left the page counter showing the previous page.
+    // updateWindow does not run in this mode, so without this, reading in
+    // single-page mode would never save progress at all.
+    emit('position', { page: clamped - 1, fraction: 0 })
+
+    // Single-page mode renders only the current page, so changing it replaces
+    // the element. Rendering before Vue has created the new one found nothing
+    // to draw on and left the page blank.
+    await nextTick()
+    // Started, not awaited. Navigation must not queue behind painting, or a
+    // slow page makes the next click feel broken — and a render that never
+    // settles would block navigation entirely.
+    void renderPage(clamped)
     return
   }
-  nextTick(() => {
-    const el = hostFor(clamped)
-    if (el && viewport.value) {
-      viewport.value.scrollTop = el.offsetTop - viewport.value.offsetTop
-        + fraction * el.getBoundingClientRect().height
-    }
-    updateWindow()
-  })
+
+  await nextTick()
+  const el = hostFor(clamped)
+  if (el && viewport.value) {
+    viewport.value.scrollTop = el.offsetTop - viewport.value.offsetTop
+      + fraction * el.getBoundingClientRect().height
+  }
+  updateWindow()
 }
 
 /** Wrap occurrences of the query inside an already-rendered text layer. */
@@ -493,12 +519,19 @@ onBeforeUnmount(() => {
 })
 
 // A zoom change invalidates every rendered canvas.
-watch(scale, () => {
+watch(scale, async () => {
   for (const number of [...rendered]) releasePage(number)
-  nextTick(updateWindow)
+  await nextTick()
+  if (props.mode === 'single') void renderPage(current.value)
+  else updateWindow()
 })
 
-watch(() => props.mode, () => nextTick(() => goTo(current.value)))
+watch(() => props.mode, async () => {
+  // Every rendered page belongs to the layout that is being replaced.
+  for (const number of [...rendered]) releasePage(number)
+  await nextTick()
+  void goTo(current.value)
+})
 
 // A ResizeObserver rather than a window resize listener, because opening the
 // contents sidebar narrows the stage without the window changing size at all —
