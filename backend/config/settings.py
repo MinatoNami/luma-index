@@ -79,6 +79,8 @@ INSTALLED_APPS = [
     "drf_spectacular",
     "accounts",
     "api",
+    "library",
+    "integrations.google_drive",
 ]
 
 MIDDLEWARE = [

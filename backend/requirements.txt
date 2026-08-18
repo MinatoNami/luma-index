@@ -7,3 +7,6 @@ psycopg[binary]>=3.2,<4
 gunicorn>=23,<24
 cryptography>=42                 # Fernet, for OAuth refresh-token encryption
 whitenoise>=6.7,<7               # serves Django Admin static files
+httpx>=0.27,<0.29                # Drive REST + OAuth token calls
+google-auth>=2.35,<3             # ID token verification (the email_verified check)
+pypdfium2>=4.30,<5               # thumbnails, page count, text-layer probe (Apache-2.0)
