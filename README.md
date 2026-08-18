@@ -23,8 +23,8 @@ Caddy and a background worker — reachable over
 
 | | |
 | --- | --- |
-| **Upload** | Drop in PDFs, or a ZIP whose folder structure is rebuilt on import. Identical files are stored once. |
-| **Organise** | Folders you create, rename, move, and delete. Deleting goes to a trash you can restore from. |
+| **Upload** | Drag PDFs in from your computer — onto the page, or straight onto a folder. A ZIP has its folder structure rebuilt on import. Identical files are stored once. |
+| **Organise** | Folders you create, rename, and delete. Drag items onto a folder to move them, or use the picker on any row. Deleting goes to a trash you can restore from. |
 | **Read** | A PDF.js reader: continuous scroll or single page, zoom, text selection, search within the book, an outline sidebar, page thumbnails. |
 | **Resume** | Your place is saved as you read and picked up on any other device. |
 | **Annotate** | Bookmarks, highlighted passages in four colours, notes on a highlight, and page notes for scans with no text layer. |
@@ -193,7 +193,6 @@ has to be checked in a real browser.**
 | What | Consequence |
 | --- | --- |
 | **Per-user storage quotas** | A global maximum upload size and a free-disk floor exist, but nothing stops one account filling the disk. |
-| **Drag to move** | There is a folder picker on every row now, but no drag-onto-folder. |
 | **Real email delivery** | Password reset works, but the console backend prints reset links into the log. Point `LUMA_EMAIL_BACKEND` at an SMTP relay before a second person has an account. |
 | **Off-box backups** | `deploy.sh backup` writes to the host it is backing up. The restore procedure itself has been rehearsed — see [the drill](docs/deployment.md#the-restore-drill) — but copying dumps and the `library` volume elsewhere is still manual. |
 | **Emptying the trash automatically** | Trashed items stay until deleted by hand. |

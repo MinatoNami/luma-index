@@ -36,6 +36,70 @@ const moving = ref<{ kind: 'folder' | 'book'; id: number; name: string
                      currentFolder: number | null } | null>(null)
 const moveError = ref('')
 
+// -- drag and drop ---------------------------------------------------------- //
+// Two different drops land on a folder: files from the computer, which upload
+// into it, and a row from the page, which moves. They are told apart by whether
+// the drop carries files.
+const DRAG_TYPE = 'application/x-lumaindex'
+const dragPayload = ref<{ kind: 'folder' | 'book'; id: number } | null>(null)
+const dropTarget = ref<number | null | 'none'>('none')
+
+function onRowDragStart(event: DragEvent, kind: 'folder' | 'book', id: number) {
+  dragPayload.value = { kind, id }
+  event.dataTransfer?.setData(DRAG_TYPE, JSON.stringify({ kind, id }))
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+}
+
+function onRowDragEnd() {
+  dragPayload.value = null
+  dropTarget.value = 'none'
+}
+
+function canDropOn(folder: Folder): boolean {
+  const dragged = dragPayload.value
+  // A folder cannot be dropped into itself. Deeper cycles are the server's
+  // call, and its message is shown if it refuses.
+  return !(dragged?.kind === 'folder' && dragged.id === folder.id)
+}
+
+function onFolderDragOver(event: DragEvent, folder: Folder) {
+  if (!canDropOn(folder)) return
+  event.preventDefault()
+  event.stopPropagation()
+  dropTarget.value = folder.id
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = event.dataTransfer.types.includes('Files') ? 'copy' : 'move'
+  }
+}
+
+async function onFolderDrop(event: DragEvent, folder: Folder) {
+  event.preventDefault()
+  event.stopPropagation()
+  dropTarget.value = 'none'
+  dragDepth = 0
+  dragging.value = false
+
+  const files = Array.from(event.dataTransfer?.files ?? [])
+  if (files.length) {
+    await submitFiles(files, folder.id)
+    return
+  }
+
+  const raw = event.dataTransfer?.getData(DRAG_TYPE)
+  const dragged = raw ? JSON.parse(raw) : dragPayload.value
+  if (!dragged || !canDropOn(folder)) return
+
+  // Resolve the name so the confirmation names what moved, rather than
+  // reading as an empty pair of quotes.
+  const name = dragged.kind === 'folder'
+    ? folders.value.find(f => f.id === dragged.id)?.name ?? 'folder'
+    : books.value.find(b => b.id === dragged.id)?.title ?? 'book'
+
+  moving.value = { kind: dragged.kind, id: dragged.id, name,
+                   currentFolder: currentId.value }
+  await completeMove(folder.id)
+}
+
 function startMove(item: Folder | Book, kind: 'folder' | 'book') {
   moveError.value = ''
   moving.value = {
@@ -153,13 +217,13 @@ async function act(work: () => Promise<unknown>, message = '') {
 
 // -- upload ---------------------------------------------------------------- //
 
-async function submitFiles(files: File[]) {
+async function submitFiles(files: File[], destination: number | null = currentId.value) {
   if (!files.length) return
   busy.value = true
   error.value = ''
   notice.value = ''
   try {
-    const result = await library.upload(files, currentId.value)
+    const result = await library.upload(files, destination)
     const parts: string[] = []
     if (result.imported.length) parts.push(`${result.imported.length} added`)
     if (result.duplicates) parts.push(`${result.duplicates} already here`)
@@ -403,7 +467,11 @@ function itemLabel(folder: Folder): string {
         <div class="row head">
           <span>Name</span><span>Size</span><span>Pages</span><span />
         </div>
-        <div v-for="folder in folders" :key="`f${folder.id}`" class="row">
+        <div v-for="folder in folders" :key="`f${folder.id}`" class="row"
+             :class="{ 'drop-into': dropTarget === folder.id }" draggable="true"
+             @dragstart="onRowDragStart($event, 'folder', folder.id)" @dragend="onRowDragEnd"
+             @dragover="onFolderDragOver($event, folder)"
+             @dragleave="dropTarget = 'none'" @drop="onFolderDrop($event, folder)">
           <button class="cell name" type="button" @click="open(folder)">
             <span class="folder-chip"><AppIcon name="folder" :size="17" /></span>
             <span class="label">{{ folder.name }}</span>
@@ -412,7 +480,8 @@ function itemLabel(folder: Folder): string {
           <span class="cell" />
           <RowMenu :actions="folderActions(folder)" :label="`Actions for ${folder.name}`" />
         </div>
-        <div v-for="book in books" :key="`b${book.id}`" class="row">
+        <div v-for="book in books" :key="`b${book.id}`" class="row" draggable="true"
+             @dragstart="onRowDragStart($event, 'book', book.id)" @dragend="onRowDragEnd">
           <NuxtLink class="cell name" :to="bookHref(book)">
             <BookCover :book="book" size="sm" />
             <span class="label">{{ book.title }}</span>
@@ -429,7 +498,12 @@ function itemLabel(folder: Folder): string {
 
       <!-- Grid and large icons ----------------------------------------- -->
       <div v-else :class="['cards', view]">
-        <div v-for="folder in folders" :key="`f${folder.id}`" class="card folder-card panel">
+        <div v-for="folder in folders" :key="`f${folder.id}`"
+             class="card folder-card panel"
+             :class="{ 'drop-into': dropTarget === folder.id }" draggable="true"
+             @dragstart="onRowDragStart($event, 'folder', folder.id)" @dragend="onRowDragEnd"
+             @dragover="onFolderDragOver($event, folder)"
+             @dragleave="dropTarget = 'none'" @drop="onFolderDrop($event, folder)">
           <button class="card-open" type="button" @click="open(folder)">
             <span class="folder-art"><AppIcon name="folder" :size="view === 'large' ? 34 : 26" /></span>
             <span class="card-title">{{ folder.name }}</span>
@@ -438,7 +512,8 @@ function itemLabel(folder: Folder): string {
           <RowMenu class="card-menu" :actions="folderActions(folder)"
                    :label="`Actions for ${folder.name}`" />
         </div>
-        <div v-for="book in books" :key="`b${book.id}`" class="card panel">
+        <div v-for="book in books" :key="`b${book.id}`" class="card panel" draggable="true"
+             @dragstart="onRowDragStart($event, 'book', book.id)" @dragend="onRowDragEnd">
           <NuxtLink class="card-open" :to="bookHref(book)">
             <BookCover :book="book" :size="view === 'large' ? 'lg' : 'md'" />
             <span class="card-title">{{ book.title }}</span>
@@ -454,7 +529,9 @@ function itemLabel(folder: Folder): string {
 
     </main>
 
-    <div v-if="dragging" class="dropzone" aria-hidden="true">
+    <!-- pointer-events: none, or this overlay would intercept every drop that
+         was aimed at a folder row underneath it. -->
+    <div v-if="dragging && !dragPayload" class="dropzone" aria-hidden="true">
       <div class="dropzone-inner">
         <AppIcon name="upload" :size="26" />
         <strong>Drop to add to {{ currentFolder?.name || 'your library' }}</strong>
@@ -533,6 +610,12 @@ function itemLabel(folder: Folder): string {
 }
 .row:last-child { border-bottom: 0; }
 .row:not(.head):hover { background: var(--surface-hover); }
+.row[draggable="true"] { cursor: grab; }
+.row.drop-into, .card.drop-into {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background: var(--accent-soft);
+}
 .row.head {
   font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.04em;
   color: var(--text-tertiary); background: var(--surface-sunken); padding-block: var(--space-2);
@@ -605,6 +688,7 @@ function itemLabel(folder: Folder): string {
 .dropzone {
   position: fixed; inset: 0; z-index: 40; display: grid; place-items: center;
   padding: var(--space-5); background: rgb(20 19 16 / 45%);
+  pointer-events: none;
 }
 .dropzone-inner {
   display: grid; justify-items: center; gap: var(--space-2);
