@@ -132,9 +132,8 @@ def test_password_change_requires_current_password(client: Client, user):
 @pytest.mark.django_db
 def test_api_denies_anonymous_by_default(client: Client):
     """DRF's default permission must stay deny-by-default."""
-    from rest_framework.settings import api_settings
-
     from rest_framework.permissions import IsAuthenticated
+    from rest_framework.settings import api_settings
 
     assert IsAuthenticated in api_settings.DEFAULT_PERMISSION_CLASSES
 
@@ -292,3 +291,142 @@ def test_client_ip_trusts_only_configured_proxy_hops(settings):
     # One proxy: trust only the hop it appended, never the forged prefix.
     assert client_ip(request) == "203.0.113.9"
     api_settings.reload()
+
+
+# --- Password reset ---------------------------------------------------------- #
+
+def _request_reset(client: Client, email: str):
+    client.get(reverse("accounts:csrf"))
+    token = client.cookies["lumaindex_csrftoken"].value
+    return client.post(reverse("accounts:password-reset"), {"email": email},
+                       content_type="application/json", headers={"x-csrftoken": token})
+
+
+def _reset_link_parts(mail_body: str) -> tuple[str, str]:
+    import re
+    match = re.search(r"/reset/([^/\s]+)/([^\s]+)", mail_body)
+    assert match, f"no reset link in email:\n{mail_body}"
+    return match.group(1), match.group(2)
+
+
+@pytest.mark.django_db
+def test_reset_request_sends_a_link(client: Client, user, mailoutbox):
+    assert _request_reset(client, "alice@example.com").status_code == 204
+    assert len(mailoutbox) == 1
+    assert mailoutbox[0].to == ["alice@example.com"]
+
+
+@pytest.mark.django_db
+def test_reset_request_does_not_reveal_whether_an_account_exists(client: Client, user,
+                                                                 mailoutbox):
+    """Same status for a known and an unknown address, and no mail for the latter."""
+    known = _request_reset(client, "alice@example.com")
+    unknown = _request_reset(Client(), "nobody@example.com")
+    assert known.status_code == unknown.status_code == 204
+    assert [m.to for m in mailoutbox] == [["alice@example.com"]]
+
+
+@pytest.mark.django_db
+def test_reset_request_is_silent_for_disabled_accounts(client: Client, user, mailoutbox):
+    user.is_active = False
+    user.save(update_fields=["is_active"])
+    assert _request_reset(client, "alice@example.com").status_code == 204
+    assert mailoutbox == []
+
+
+@pytest.mark.django_db
+def test_full_reset_flow_changes_the_password(client: Client, user, mailoutbox):
+    _request_reset(client, "alice@example.com")
+    uid, token = _reset_link_parts(mailoutbox[0].body)
+
+    new_password = "a-brand-new-passphrase-42"
+    confirm = Client()
+    confirm.get(reverse("accounts:csrf"))
+    csrf = confirm.cookies["lumaindex_csrftoken"].value
+    response = confirm.post(reverse("accounts:password-reset-confirm"),
+                            {"uid": uid, "token": token, "new_password": new_password},
+                            content_type="application/json", headers={"x-csrftoken": csrf})
+    assert response.status_code == 204
+
+    user.refresh_from_db()
+    assert user.check_password(new_password)
+    assert not user.check_password(PASSWORD)
+
+
+@pytest.mark.django_db
+def test_reset_token_is_single_use(client: Client, user, mailoutbox):
+    _request_reset(client, "alice@example.com")
+    uid, token = _reset_link_parts(mailoutbox[0].body)
+
+    def attempt(password):
+        c = Client()
+        c.get(reverse("accounts:csrf"))
+        csrf = c.cookies["lumaindex_csrftoken"].value
+        return c.post(reverse("accounts:password-reset-confirm"),
+                      {"uid": uid, "token": token, "new_password": password},
+                      content_type="application/json", headers={"x-csrftoken": csrf})
+
+    assert attempt("first-new-passphrase-42").status_code == 204
+    assert attempt("second-new-passphrase-42").status_code == 400
+
+
+@pytest.mark.django_db
+def test_reset_rejects_a_tampered_token(client: Client, user, mailoutbox):
+    _request_reset(client, "alice@example.com")
+    uid, token = _reset_link_parts(mailoutbox[0].body)
+
+    c = Client()
+    c.get(reverse("accounts:csrf"))
+    csrf = c.cookies["lumaindex_csrftoken"].value
+    response = c.post(reverse("accounts:password-reset-confirm"),
+                      {"uid": uid, "token": token[:-2] + "xy",
+                       "new_password": "another-long-passphrase-42"},
+                      content_type="application/json", headers={"x-csrftoken": csrf})
+    assert response.status_code == 400
+    user.refresh_from_db()
+    assert user.check_password(PASSWORD)
+
+
+@pytest.mark.django_db
+def test_expired_reset_token_is_rejected(client: Client, user, mailoutbox, monkeypatch):
+    _request_reset(client, "alice@example.com")
+    uid, token = _reset_link_parts(mailoutbox[0].body)
+
+    # Move the generator's clock past PASSWORD_RESET_TIMEOUT rather than setting
+    # the timeout to zero — Django compares `elapsed > timeout`, so a zero
+    # timeout with zero elapsed time still passes and the test proves nothing.
+    from datetime import datetime, timedelta
+
+    from django.contrib.auth.tokens import default_token_generator
+
+    monkeypatch.setattr(default_token_generator, "_now",
+                        lambda: datetime.now() + timedelta(seconds=7200))
+
+    c = Client()
+    c.get(reverse("accounts:csrf"))
+    csrf = c.cookies["lumaindex_csrftoken"].value
+    response = c.post(reverse("accounts:password-reset-confirm"),
+                      {"uid": uid, "token": token, "new_password": "another-long-one-42"},
+                      content_type="application/json", headers={"x-csrftoken": csrf})
+    assert response.status_code == 400
+
+
+@pytest.mark.django_db
+def test_reset_enforces_password_strength(client: Client, user, mailoutbox):
+    _request_reset(client, "alice@example.com")
+    uid, token = _reset_link_parts(mailoutbox[0].body)
+
+    c = Client()
+    c.get(reverse("accounts:csrf"))
+    csrf = c.cookies["lumaindex_csrftoken"].value
+    response = c.post(reverse("accounts:password-reset-confirm"),
+                      {"uid": uid, "token": token, "new_password": "short"},
+                      content_type="application/json", headers={"x-csrftoken": csrf})
+    assert response.status_code == 400
+
+
+@pytest.mark.django_db
+def test_reset_requires_csrf(user):
+    c = Client(enforce_csrf_checks=True)
+    assert c.post(reverse("accounts:password-reset"), {"email": "alice@example.com"},
+                  content_type="application/json").status_code == 403

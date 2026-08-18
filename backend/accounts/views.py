@@ -16,6 +16,7 @@ import logging
 
 from django.conf import settings
 from django.contrib.auth import login, logout, update_session_auth_hash
+from django.core.mail import send_mail
 from django.middleware.csrf import get_token
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_protect
@@ -32,8 +33,11 @@ from common.throttling import TargetedAccountThrottle
 from .serializers import (
     LoginSerializer,
     PasswordChangeSerializer,
+    PasswordResetConfirmSerializer,
+    PasswordResetRequestSerializer,
     RegisterSerializer,
     UserSerializer,
+    build_reset_token,
 )
 
 logger = logging.getLogger("lumaindex.accounts")
@@ -150,4 +154,76 @@ class PasswordChangeView(APIView):
         # expire. Tighten to a full session flush if you want change-password
         # to sign out every other device.
         update_session_auth_hash(request, request.user)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@csrf_required
+class PasswordResetRequestView(APIView):
+    """Start a password reset.
+
+    Always answers 204, whether or not the address has an account. Anything
+    else turns this endpoint into a way to enumerate the instance's users.
+    """
+
+    permission_classes = [AllowAny]
+    throttle_scope = "auth"
+
+    @extend_schema(
+        summary="Request a password reset",
+        request=PasswordResetRequestSerializer,
+        responses={204: OpenApiResponse(
+            description="Accepted. Sent only if the address has an active account.")},
+    )
+    def post(self, request):
+        serializer = PasswordResetRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        user = serializer.get_user()
+        if user is not None:
+            uid, token = build_reset_token(user)
+            reset_url = f"{settings.PUBLIC_ORIGIN.rstrip('/')}/reset/{uid}/{token}"
+            hours = settings.PASSWORD_RESET_TIMEOUT // 3600
+            send_mail(
+                subject="Reset your LumaIndex password",
+                message=(
+                    "Someone asked to reset the LumaIndex password for this "
+                    "address.\n\n"
+                    f"{reset_url}\n\n"
+                    f"The link is valid for {hours} hour(s) and stops working "
+                    "once it is used.\n\n"
+                    "If this was not you, no action is needed — your password "
+                    "has not changed."
+                ),
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[user.email],
+                fail_silently=False,
+            )
+            # The URL carries the token, so it must never reach the log.
+            logger.info("password reset requested",
+                        extra={"event": "auth.reset.requested", "user_id": user.pk})
+        else:
+            logger.info("password reset requested for unknown address",
+                        extra={"event": "auth.reset.unknown"})
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@csrf_required
+class PasswordResetConfirmView(APIView):
+    permission_classes = [AllowAny]
+    throttle_scope = "auth"
+
+    @extend_schema(
+        summary="Complete a password reset",
+        request=PasswordResetConfirmSerializer,
+        responses={204: OpenApiResponse(description="Password changed")},
+    )
+    def post(self, request):
+        serializer = PasswordResetConfirmSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
+        logger.info("password reset completed",
+                    extra={"event": "auth.reset.completed", "user_id": user.pk})
+        # No automatic sign-in: whoever holds the link is not yet proven to be
+        # the account owner beyond controlling the mailbox.
         return Response(status=status.HTTP_204_NO_CONTENT)

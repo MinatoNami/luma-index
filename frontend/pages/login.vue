@@ -46,6 +46,8 @@ async function onSubmit() {
       </button>
 
       <p v-if="error" class="error" role="alert">{{ error }}</p>
+
+      <p class="forgot"><NuxtLink to="/forgot-password">Forgot your password?</NuxtLink></p>
     </form>
   </main>
 </template>
@@ -62,4 +64,5 @@ h1 { margin: 0; font-size: 1.5rem; }
 .sub { margin: 0.25rem 0 1.5rem; color: var(--muted); font-size: 0.9rem; }
 .field { margin-bottom: 1rem; }
 button { width: 100%; }
+.forgot { margin: 1.25rem 0 0; font-size: 0.875rem; text-align: center; }
 </style>

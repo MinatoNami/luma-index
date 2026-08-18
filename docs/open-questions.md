@@ -138,12 +138,19 @@ workers deleting from one directory concurrently.
 
 ## Operational
 
-### 12. Password reset has no mail path
-PRD §7 requires password reset; nothing in the PRD sends email. The instance
-ships with the console backend, so reset links land in the backend log.
+### 12. Password reset works, but has no real mail path
+The endpoints exist (`/api/auth/password/reset/` and `.../confirm/`), links
+expire in an hour, are single-use, and the request endpoint answers identically
+for known and unknown addresses so it cannot be used to enumerate users.
 
-**Action:** fine for a single user. Before a second person depends on it, point
-`LUMA_EMAIL_BACKEND=smtp` at a relay (Fastmail, SES, Resend) — a Tailscale-only
+What is still missing is delivery. The instance ships with Django's console
+backend, so **reset links are printed into the backend log** — workable for a
+single user who can run `./deploy/deploy.sh logs backend`, and unacceptable once
+anyone else has an account, since anyone who can read the logs can take over any
+account.
+
+**Action:** before a second person depends on this instance, point
+`LUMA_EMAIL_BACKEND=smtp` at a relay (Fastmail, SES, Resend). A Tailscale-only
 box has no deliverable mail path of its own.
 
 ### 13. The PDF cache can take the database down

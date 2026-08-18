@@ -162,6 +162,10 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LOGIN_URL = "/login"
 
+# Reset links expire in an hour. Django's 3-day default is generous for an
+# instance whose mail may sit in a log file.
+PASSWORD_RESET_TIMEOUT = env_int("LUMA_PASSWORD_RESET_TIMEOUT", 3600)
+
 # PRD non-goal: no open public registration unless explicitly enabled.
 REGISTRATION_ENABLED = env_bool("LUMA_REGISTRATION_ENABLED", False)
 

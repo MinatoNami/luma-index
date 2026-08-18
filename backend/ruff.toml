@@ -8,4 +8,8 @@ ignore = [
 ]
 
 [lint.per-file-ignores]
-"*/migrations/*" = ["E501"]
+# Migrations are generated; their import order is Django's business.
+"*/migrations/*" = ["E501", "I001"]
+# S105 flags every literal used as a test password or a redaction fixture.
+"**/test_*.py" = ["S105", "S106"]
+"**/tests_*.py" = ["S105", "S106"]
