@@ -133,8 +133,8 @@ heavily annotated 900-page book is a lot of JSON to hand a phone.
 - Highlight overlay layer positioned from `position_data`, re-projected on
   every zoom or resize via `viewport.convertToViewportPoint()`.
 - Annotations sidebar: bookmarks, highlights, notes; click to jump.
-- Touch selection on tablet — the primary reading target (§39), and where text
-  selection is hardest.
+- Touch selection, which is where text selection is hardest. (§39 calls tablet
+  a primary reading target; that was later set aside — see the README.)
 - Deletion with undo rather than a confirm dialog.
 
 ---

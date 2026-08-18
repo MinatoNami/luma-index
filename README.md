@@ -174,12 +174,14 @@ Things built but unproven, or deliberately missing.
 
 ### Unverified
 
-| What | Detail |
-| --- | --- |
-| **The reader on a tablet** | PRD §39 calls tablet a primary reading target. Touch selection and memory behaviour have only been checked on a desktop browser. |
+Creating, removing and recolouring highlights, single-page navigation, and
+covers surviving a refresh were all unverified here and have since been
+confirmed working in a real browser.
 
-Creating, removing and recolouring highlights, and single-page navigation, were
-all unverified here and have since been confirmed working in a real browser.
+The interface is responsive and its controls are touch-sized, but only desktop
+browsers have been exercised in anger. PRD §39 treats tablet as a primary
+reading target; in practice it is not one for this instance, so tablet-specific
+testing is not tracked as outstanding work.
 
 The reason they could not be checked from the development tooling is worth
 keeping: the preview pane cannot render PDFs at all. PDF.js drives its render

@@ -96,7 +96,7 @@
   --duration-fast: 120ms;
   --duration: 180ms;
 
-  /* Comfortable on a tablet, which PRD §39 calls a primary reading target. */
+  /* Large enough to hit reliably with a finger as well as a pointer. */
   --tap-target: 40px;
 }
 

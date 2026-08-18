@@ -148,7 +148,8 @@ the developer with 12 books and falls over on a real import.
 - Cover, title, filename, progress bar, original Drive path (PRD §15).
 - Collection sidebar: nested, drag to add, rename inline.
 - Search field, sort menu, filter chips.
-- Responsive down to phone width; tablet is a primary target (§39).
+- Responsive down to phone width. (§39 calls tablet a primary target; that
+  was later set aside — see the README.)
 - Skeleton states — thumbnails arrive after import, not during.
 
 ---
