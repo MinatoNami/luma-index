@@ -8,13 +8,20 @@ which of the 31 MVP success criteria (§45) it proves.
 | --- | --- | --- |
 | 1 — Platform foundation | **Built** | see the repository and [deployment.md](../deployment.md) |
 | 2 — Uploads, folders, storage | **Built** | [02-uploads.md](02-uploads.md) |
-| 3 — Library | Scoped | [03-library.md](03-library.md) |
+| 3 — Library | **Partly built** | [03-library.md](03-library.md) |
 | 4 — PDF reader | Scoped | [04-reader.md](04-reader.md) |
 | 5 — Bookmarks, highlights, notes | Scoped | [05-reading-data.md](05-reading-data.md) |
 | 6 — Sharing | Scoped | [06-sharing.md](06-sharing.md) |
 | 7 — Hardening | Scoped | [07-hardening.md](07-hardening.md) |
 
 ---
+
+Phase 3 is half-done as a side effect of Phase 2 and the interface work: list,
+grid and large-icon views, covers, search and sort all exist. What remains is
+collections, favourites, and the virtual views — and three of those
+(Continue Reading, Recently Opened, Shared With Me) need models from Phases 4
+and 6, so the rest of Phase 3 is best finished after the reader rather than
+before it.
 
 ## Decisions that outlive their phase
 
@@ -27,14 +34,14 @@ is discovered late.
 | 1 | ~~Google OAuth scope route~~ | — | **Moot.** Drive was removed in favour of uploads. |
 | 2 | **PDF rendering library** | [Phase 2](02-uploads.md) | Settled: pypdfium2 (Apache-2.0). PyMuPDF is AGPL, and swapping it after it is woven through import, search, and the reader is a rewrite. |
 | 3 | **Where ingestion executes** | [Phase 2](02-uploads.md) | Settled: a polling worker. A ZIP of several hundred books cannot be extracted inside a request. |
-| 4 | **How PDF bytes reach the browser** | [Phase 4 D1](04-reader.md) | Range support and not blocking a worker per download. Shapes the content endpoint's signature. |
+| 4 | **How PDF bytes reach the browser** | [Phase 4 D1](04-reader.md) | Half-settled: the endpoint now returns 206 for byte ranges, so PDF.js can open a large book without downloading it all. Still open is whether large reads keep tying up a gunicorn worker. |
 | 5 | **Highlight anchoring format** | [Phase 5 D1](05-reading-data.md) | Once highlights exist, the coordinates cannot be recomputed — the mapping depended on a viewport that is gone. |
 | 6 | **The deletion matrix** | [Phase 6 D1](06-sharing.md) | §33 leaves it undefined. Every FK needs an explicit `on_delete`, and getting it wrong destroys other people's annotations. |
 
-Decisions 1–3 are settled. **4, 5 and 6 are still open** and all three get
-harder the longer they wait: PDF delivery shapes the reader endpoint, the
-highlight format cannot be migrated once highlights exist, and the deletion
-matrix decides what happens to other people's annotations.
+Decisions 1–3 are settled and 4 is half-settled. **5 and 6 are still open**,
+and both get harder the longer they wait: the highlight format cannot be
+migrated once highlights exist, and the deletion matrix decides what happens to
+other people's annotations.
 
 ## Dependency order
 
