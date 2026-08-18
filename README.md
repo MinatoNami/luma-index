@@ -12,8 +12,9 @@ Designed to run on an Ubuntu server behind Tailscale, and to be read from deskto
 
 ## Status
 
-**Phases 1 and 2 are built.** The reader, sharing, and annotations are still
-to come.
+**Phases 1, 2 and 4 are built**, Phase 3 in part, and Phase 5's backend.
+Sharing and hardening are still to come. See [Known gaps](#known-gaps) for what
+is unproven.
 
 Working today: Docker Compose stack, PostgreSQL, Django + DRF with a custom
 user model, session-cookie authentication with password reset, Django Admin, an
@@ -22,8 +23,12 @@ with rename/move/trash, content-addressed storage, an ingest worker that probes
 page counts and renders thumbnails, a Nuxt file browser, and a one-command SSH
 deploy to Ubuntu behind Tailscale.
 
-Not built yet: the PDF reader, reading progress, bookmarks, highlights, and
-sharing.
+Working today also: a PDF.js reader with continuous and single-page modes,
+zoom, text selection, in-book search, page thumbnails, an outline sidebar, and
+reading position synced across devices. Bookmarks, highlights and notes have a
+tested API; their interface is written but unverified.
+
+Not built yet: sharing between users, and Phase 3's collections and favourites.
 
 - [lumaindex-prd.md](lumaindex-prd.md) — the full PRD, and the source of truth
   for scope and behaviour. Where this README and the PRD disagree, the PRD wins.
@@ -32,6 +37,42 @@ sharing.
   with the decision each one needs and when it has to be made.
 - [docs/phases/](docs/phases/) — Phases 2–7 scoped: data models, APIs, risks,
   and the decisions to settle before writing each one.
+
+---
+
+## Known gaps
+
+Things that are built but unproven, or deliberately missing. Kept here so none
+of it has to be rediscovered.
+
+### Unverified
+
+| What | Why it is unverified |
+| --- | --- |
+| **The annotation UI** — selection toolbar, highlight overlay, notes panel | Written and building, never exercised in a browser. PDF.js drives its render loop with `requestAnimationFrame`, and the development preview pane runs with `document.visibilityState: 'hidden'`, where rAF never fires — so a render never completes and nothing downstream of it runs. The backend behind it is covered by tests. **Open a book in a real browser and highlight a passage; if nothing paints, look at `paintHighlights` and the `props.highlights` watcher.** |
+| **The reader on a tablet** | PRD §39 calls tablet a primary reading target. Touch selection and memory behaviour have only been checked on a desktop browser. |
+
+### Missing on purpose, for now
+
+| What | Consequence |
+| --- | --- |
+| **Per-user storage quotas** | There is a global maximum upload size and a free-disk floor, but nothing stops one account filling the disk. Fine for a household; needed before strangers share an instance. |
+| **Moving items to an arbitrary folder** | The row menu offers "move up one level" only. No folder picker and no drag-onto-folder, which is the main place this still feels less capable than Drive. |
+| **Real email delivery** | Password reset works, but the console backend prints reset links into the backend log. Anyone who can read logs can take over any account, so point `LUMA_EMAIL_BACKEND` at an SMTP relay before a second person has an account. |
+| **Off-box backups, and a restore drill** | `deploy.sh backup` writes to the same host it is backing up. That covers "I broke the database", not "the disk died". A restore has never been rehearsed. |
+| **Emptying the trash automatically** | Trashed items stay until deleted by hand. |
+| **Collections and favourites** | Phase 3's remaining half. Search, sort, and the three views exist; the many-to-many layer does not. |
+
+### Decisions still open
+
+Both get harder the longer they wait, and both are argued in
+[docs/phases/](docs/phases/):
+
+- **The deletion matrix** (Phase 6) — what happens to *other people's*
+  annotations when an owner deletes their account or un-shares a book. PRD §33
+  leaves it undefined.
+- **Whether large reads should bypass gunicorn** — byte ranges work, so a big
+  book opens quickly, but a long download still occupies a worker.
 
 ---
 
