@@ -29,7 +29,7 @@ const emit = defineEmits<{
   error: [string]
   select: [{ page: number; quads: Quad[]; text: string; x: number; y: number }]
   clearSelection: []
-  openHighlight: [number]
+  openHighlight: [{ id: number; x: number; y: number }]
 }>()
 
 // How many pages either side of the visible one keep their canvas.
@@ -174,7 +174,13 @@ watch(() => props.highlights, repaintAllHighlights, { deep: true })
 
 function onLayerClick(event: MouseEvent) {
   const target = (event.target as HTMLElement).closest('.highlight-mark') as HTMLElement | null
-  if (target?.dataset.highlight) emit('openHighlight', Number(target.dataset.highlight))
+  if (!target?.dataset.highlight) return
+  const box = target.getBoundingClientRect()
+  emit('openHighlight', {
+    id: Number(target.dataset.highlight),
+    x: box.left + box.width / 2,
+    y: box.bottom,
+  })
 }
 
 /** A finished selection inside a page becomes quads the server can store. */

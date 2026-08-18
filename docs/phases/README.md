@@ -10,8 +10,8 @@ which of the 31 MVP success criteria (§45) it proves.
 | 2 — Uploads, folders, storage | **Built** | [02-uploads.md](02-uploads.md) |
 | 3 — Library | **Partly built** | [03-library.md](03-library.md) |
 | 4 — PDF reader | **Built** | [04-reader.md](04-reader.md) |
-| 5 — Bookmarks, highlights, notes | Scoped | [05-reading-data.md](05-reading-data.md) |
-| 6 — Sharing | Scoped | [06-sharing.md](06-sharing.md) |
+| 5 — Bookmarks, highlights, notes | **Built** | [05-reading-data.md](05-reading-data.md) |
+| 6 — Sharing | **Built** | [06-sharing.md](06-sharing.md) |
 | 7 — Hardening | Scoped | [07-hardening.md](07-hardening.md) |
 
 ---
@@ -36,12 +36,11 @@ is discovered late.
 | 3 | **Where ingestion executes** | [Phase 2](02-uploads.md) | Settled: a polling worker. A ZIP of several hundred books cannot be extracted inside a request. |
 | 4 | ~~How PDF bytes reach the browser~~ | [Phase 4 D1](04-reader.md) | **Settled.** The endpoint returns 206 for byte ranges and PDF.js fetches only what it needs. Whether large reads should bypass gunicorn entirely is now a tuning question, not a design one. |
 | 5 | **Highlight anchoring format** | [Phase 5 D1](05-reading-data.md) | Once highlights exist, the coordinates cannot be recomputed — the mapping depended on a viewport that is gone. |
-| 6 | **The deletion matrix** | [Phase 6 D1](06-sharing.md) | §33 leaves it undefined. Every FK needs an explicit `on_delete`, and getting it wrong destroys other people's annotations. |
+| 6 | ~~The deletion matrix~~ | [Phase 6 D1](06-sharing.md) · `library/lifecycle.py` | **Settled.** The table lives in the module docstring. The load-bearing choice: un-sharing keeps other readers' annotations, deleting the book does not. |
 
-Decisions 1–4 are settled. **5 and 6 are still open**,
-and both get harder the longer they wait: the highlight format cannot be
-migrated once highlights exist, and the deletion matrix decides what happens to
-other people's annotations.
+All six are settled. The two that were open longest — the highlight anchoring
+format and the deletion matrix — are now enforced in code and covered by tests
+(`library/annotations.py` and `library/lifecycle.py`).
 
 ## Dependency order
 

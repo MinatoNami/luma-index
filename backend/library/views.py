@@ -24,6 +24,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .lifecycle import readers_of, set_visibility
 from .models import (
     Book,
     Bookmark,
@@ -34,6 +35,7 @@ from .models import (
     UploadBatch,
 )
 from .outline import outline_for
+from .permissions import can_modify, can_read, readable_books
 from .ranges import serve_file
 from .serializers import (
     BookmarkSerializer,
@@ -43,6 +45,7 @@ from .serializers import (
     PageNoteSerializer,
     ProgressWriteSerializer,
     ReadingProgressSerializer,
+    SharedBookSerializer,
     UploadBatchSerializer,
 )
 from .services import IngestError, store_upload
@@ -84,11 +87,35 @@ class OwnedMixin:
         return folder
 
     def get_book(self, book_id: int, *, live_only: bool = True) -> Book:
+        """A book the caller owns. Use `get_readable_book` for reading paths."""
         queryset = self.books()
         if live_only:
             queryset = queryset.live()
         book = queryset.filter(pk=book_id).first()
         if book is None:
+            raise Http404
+        return book
+
+    def get_readable_book(self, book_id: int) -> Book:
+        """A book the caller may open — theirs, or one shared with the instance.
+
+        404 rather than 403 for anything else: a 403 would confirm the book
+        exists, which is itself a leak.
+        """
+        from django.db.models import Prefetch
+
+        book = (
+            readable_books(self.request.user)
+            .select_related("source", "folder", "owner")
+            .prefetch_related(Prefetch(
+                "progress_records",
+                queryset=ReadingProgress.objects.filter(user=self.request.user),
+                to_attr="_reader_progress",
+            ))
+            .filter(pk=book_id)
+            .first()
+        )
+        if book is None or not can_read(self.request.user, book):
             raise Http404
         return book
 
@@ -231,8 +258,12 @@ class BookListView(OwnedMixin, APIView):
 class BookDetailView(OwnedMixin, APIView):
     @extend_schema(summary="One book", responses={200: BookSerializer})
     def get(self, request, book_id: int):
-        return Response(BookSerializer(self.get_book(book_id),
-                                       context={"request": request}).data)
+        book = self.get_readable_book(book_id)
+        # A non-owner gets the reader's view, which omits the owner's filename
+        # and folder path.
+        serializer = (BookSerializer if book.owner_id == request.user.pk
+                      else SharedBookSerializer)
+        return Response(serializer(book, context={"request": request}).data)
 
     @extend_schema(summary="Rename or move a book", request=BookSerializer,
                    responses={200: BookSerializer})
@@ -294,7 +325,7 @@ class BookContentView(OwnedMixin, APIView):
                               206: OpenApiResponse(description="Partial content"),
                               416: OpenApiResponse(description="Range not satisfiable")})
     def get(self, request, book_id: int):
-        book = self.get_book(book_id)
+        book = self.get_readable_book(book_id)
         source = getattr(book, "source", None)
         if source is None:
             raise Http404
@@ -323,7 +354,7 @@ class BookThumbnailView(OwnedMixin, APIView):
     @extend_schema(summary="Book thumbnail",
                    responses={200: OpenApiResponse(description="image/webp")})
     def get(self, request, book_id: int):
-        book = self.get_book(book_id)
+        book = self.get_readable_book(book_id)
         if not book.thumbnail_path:
             raise Http404
 
@@ -482,7 +513,7 @@ class BookOutlineView(OwnedMixin, APIView):
 
     @extend_schema(summary="Book outline", responses={200: OpenApiResponse()})
     def get(self, request, book_id: int):
-        book = self.get_book(book_id)
+        book = self.get_readable_book(book_id)
         source = getattr(book, "source", None)
         if source is None:
             raise Http404
@@ -503,7 +534,7 @@ class BookProgressView(OwnedMixin, APIView):
 
     @extend_schema(summary="Reading progress", responses={200: ReadingProgressSerializer})
     def get(self, request, book_id: int):
-        book = self.get_book(book_id)
+        book = self.get_readable_book(book_id)
         record = ReadingProgress.objects.filter(user=request.user, book=book).first()
         if record is None:
             return Response({"page": 0, "page_fraction": 0.0, "percentage": 0.0,
@@ -514,7 +545,7 @@ class BookProgressView(OwnedMixin, APIView):
     @extend_schema(summary="Record reading progress", request=ProgressWriteSerializer,
                    responses={200: ReadingProgressSerializer})
     def put(self, request, book_id: int):
-        book = self.get_book(book_id)
+        book = self.get_readable_book(book_id)
         serializer = ProgressWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
@@ -536,7 +567,12 @@ class BookProgressView(OwnedMixin, APIView):
                             extra={"event": "reader.progress.stale", "book_id": book.pk})
                 return Response(ReadingProgressSerializer(record).data)
 
-            page = min(data["page"], max(0, (book.page_count or 1) - 1))
+            # Only clamp against a page count we actually have. A book opened
+            # before the ingest worker has probed it has page_count None, and
+            # treating that as a single page collapsed every position to 0.
+            page = data["page"]
+            if book.page_count:
+                page = min(page, book.page_count - 1)
             record.page = page
             record.page_fraction = data["page_fraction"]
             record.percentage = self._percentage(page, data["page_fraction"], book.page_count)
@@ -591,7 +627,7 @@ class AnnotationListView(OwnedMixin, APIView):
 
     @extend_schema(summary="List annotations")
     def get(self, request, book_id: int):
-        book = self.get_book(book_id)
+        book = self.get_readable_book(book_id)
         queryset = self.queryset_for(book)
         if "page" in request.GET:
             # The reader asks per visible page; a heavily annotated 900-page
@@ -601,7 +637,7 @@ class AnnotationListView(OwnedMixin, APIView):
 
     @extend_schema(summary="Create an annotation")
     def post(self, request, book_id: int):
-        book = self.get_book(book_id)
+        book = self.get_readable_book(book_id)
         serializer = self.serializer_class(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
@@ -617,7 +653,7 @@ class AnnotationDetailView(OwnedMixin, APIView):
     serializer_class = None
 
     def get_object(self, request, book_id: int, annotation_id: int):
-        book = self.get_book(book_id)
+        book = self.get_readable_book(book_id)
         obj = self.model.objects.filter(
             pk=annotation_id, user=request.user, book=book,
         ).first()
@@ -674,3 +710,56 @@ class PageNoteListView(AnnotationListView):
 class PageNoteDetailView(AnnotationDetailView):
     model = PageNote
     serializer_class = PageNoteSerializer
+
+
+class SharedBooksView(OwnedMixin, APIView):
+    """Books other people have shared with the instance (PRD §12, §16)."""
+
+    @extend_schema(summary="Shared with me", responses={200: SharedBookSerializer(many=True)})
+    def get(self, request):
+        from django.db.models import Prefetch
+
+        books = (
+            Book.objects.live()
+            .filter(visibility=Book.Visibility.SHARED)
+            .exclude(owner=request.user)
+            .select_related("owner")
+            .prefetch_related(Prefetch(
+                "progress_records",
+                queryset=ReadingProgress.objects.filter(user=request.user),
+                to_attr="_reader_progress",
+            ))
+            .order_by("title")
+        )
+        return Response(SharedBookSerializer(books, many=True,
+                                             context={"request": request}).data)
+
+
+@csrf_required
+class BookShareView(OwnedMixin, APIView):
+    """Change a book's visibility. Owner only."""
+
+    @extend_schema(summary="Sharing status", responses={200: dict})
+    def get(self, request, book_id: int):
+        book = self.get_book(book_id)
+        return Response({
+            "visibility": book.visibility,
+            # So the UI can say "2 other people have notes on this" before an
+            # owner does something they cannot undo.
+            "other_readers": readers_of(book).count(),
+        })
+
+    @extend_schema(summary="Share or unshare", request=dict, responses={200: dict})
+    def post(self, request, book_id: int):
+        book = self.get_book(book_id)
+        if not can_modify(request.user, book):
+            raise Http404
+
+        visibility = request.data.get("visibility")
+        if visibility not in dict(Book.Visibility.choices):
+            return Response({"detail": "Unknown visibility."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        set_visibility(book, request.user, visibility)
+        return Response({"visibility": book.visibility,
+                         "other_readers": readers_of(book).count()})

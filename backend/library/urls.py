@@ -29,6 +29,9 @@ urlpatterns = [
     path("books/<int:book_id>/notes/<int:annotation_id>", views.PageNoteDetailView.as_view(),
          name="note-detail"),
 
+    path("books/<int:book_id>/share", views.BookShareView.as_view(), name="book-share"),
+    path("shared/", views.SharedBooksView.as_view(), name="shared"),
+
     path("continue-reading/", views.ContinueReadingView.as_view(), name="continue-reading"),
 
     path("upload/", views.UploadView.as_view(), name="upload"),

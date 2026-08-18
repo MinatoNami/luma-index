@@ -214,9 +214,29 @@ function folderActions(folder: Folder) {
     { label: 'Move to trash', icon: 'trash', danger: true, run: () => deleteFolder(folder) },
   ]
 }
+async function toggleShare(book: Book) {
+  const sharing = useSharing()
+  const state = await sharing.status(book.id)
+  const next = state.visibility === 'shared' ? 'private' : 'shared'
+
+  dialog.value = {
+    title: next === 'shared' ? `Share “${book.title}”?` : `Stop sharing “${book.title}”?`,
+    message: next === 'shared'
+      ? 'Everyone signed in to this instance will be able to read it. Their reading position and notes stay their own, and nothing about your folders is shared.'
+      : state.other_readers
+        ? `${state.other_readers} other reader(s) have notes on this. They keep them — re-share and their notes come back.`
+        : 'Nobody else will be able to open it.',
+    confirmLabel: next === 'shared' ? 'Share' : 'Stop sharing',
+    danger: next === 'private',
+    run: async () => { await sharing.setVisibility(book.id, next) },
+  }
+}
+
 function bookActions(book: Book) {
   return [
     { label: 'Rename', icon: 'pencil', run: () => renameBook(book) },
+    { label: book.visibility === 'shared' ? 'Stop sharing' : 'Share with instance',
+      icon: 'inbox', run: () => toggleShare(book) },
     { label: 'Open', icon: 'file', run: () => navigateTo(`/books/${book.id}`) },
     { label: 'Download', icon: 'download',
       run: () => window.open(`/api/library/books/${book.id}/content`, '_blank') },
@@ -246,6 +266,9 @@ function itemLabel(folder: Folder): string {
       </div>
       <div class="account">
         <ThemeToggle />
+        <NuxtLink class="quiet-link" to="/shared">
+          <AppIcon name="inbox" :size="16" /> Shared
+        </NuxtLink>
         <NuxtLink class="quiet-link" to="/trash">
           <AppIcon name="trash" :size="16" /> Trash
         </NuxtLink>
@@ -346,6 +369,7 @@ function itemLabel(folder: Folder): string {
           <NuxtLink class="cell name" :to="bookHref(book)">
             <BookCover :book="book" size="sm" />
             <span class="label">{{ book.title }}</span>
+            <span v-if="book.visibility === 'shared'" class="badge-shared">shared</span>
             <span v-if="book.source?.availability_status !== 'available'" class="badge-warn">
               unavailable
             </span>
@@ -471,6 +495,10 @@ function itemLabel(folder: Folder): string {
 .folder-chip {
   display: grid; place-items: center; width: 28px; height: 28px; flex: none;
   border-radius: var(--radius-sm); background: var(--accent-soft); color: var(--accent-text);
+}
+.badge-shared {
+  flex: none; font-size: var(--text-xs); padding: 2px var(--space-2);
+  border-radius: var(--radius-full); background: var(--accent-soft); color: var(--accent-text);
 }
 .badge-warn {
   flex: none; font-size: var(--text-xs); padding: 2px var(--space-2);

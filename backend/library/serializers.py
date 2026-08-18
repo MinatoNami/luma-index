@@ -91,6 +91,36 @@ class ProgressWriteSerializer(serializers.Serializer):
     client_updated_at = serializers.DateTimeField(required=False, allow_null=True)
 
 
+class SharedBookSerializer(serializers.ModelSerializer):
+    """A book as someone who does not own it sees it.
+
+    The original filename and the folder path describe the owner's own
+    organisation, not the book, and a reader has no business seeing either.
+    Kept as a separate class rather than a conditional inside BookSerializer,
+    because a conditional is where that sort of leak hides (PRD §16, §29).
+    """
+
+    owner_name = serializers.SerializerMethodField()
+    progress = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Book
+        fields = ("id", "title", "page_count", "has_text_layer", "visibility",
+                  "thumbnail_path", "owner_name", "progress", "created_at")
+        read_only_fields = fields
+
+    def get_owner_name(self, obj) -> str:
+        return obj.owner.display_name or obj.owner.email.split("@")[0]
+
+    def get_progress(self, obj):
+        records = getattr(obj, "_reader_progress", None)
+        if not records:
+            return None
+        record = records[0]
+        return {"page": record.page, "page_fraction": record.page_fraction,
+                "percentage": record.percentage, "last_opened_at": record.last_opened_at}
+
+
 class BookSerializer(serializers.ModelSerializer):
     source = BookSourceSerializer(read_only=True)
     path = serializers.CharField(read_only=True)

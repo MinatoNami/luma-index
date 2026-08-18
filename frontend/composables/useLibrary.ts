@@ -146,3 +146,37 @@ export function formatBytes(bytes: number): string {
   const index = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)))
   return `${(bytes / 1024 ** index).toFixed(index === 0 ? 0 : 1)} ${units[index]}`
 }
+
+
+export interface SharedBook {
+  id: number
+  title: string
+  page_count: number | null
+  has_text_layer: boolean | null
+  visibility: 'private' | 'shared'
+  thumbnail_path: string
+  owner_name: string
+  progress: { page: number; percentage: number; last_opened_at: string } | null
+  created_at: string
+}
+
+export function useSharing() {
+  const { api, ensureCsrf } = useApi()
+
+  async function sharedWithMe() {
+    return await api<SharedBook[]>('/library/shared/')
+  }
+
+  async function status(bookId: number) {
+    return await api<{ visibility: 'private' | 'shared'; other_readers: number }>(
+      `/library/books/${bookId}/share`)
+  }
+
+  async function setVisibility(bookId: number, visibility: 'private' | 'shared') {
+    await ensureCsrf()
+    return await api<{ visibility: 'private' | 'shared'; other_readers: number }>(
+      `/library/books/${bookId}/share`, { method: 'POST', body: { visibility } })
+  }
+
+  return { sharedWithMe, status, setVisibility }
+}

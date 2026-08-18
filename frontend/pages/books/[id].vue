@@ -44,9 +44,14 @@ const COLOURS: HighlightColour[] = ['yellow', 'green', 'blue', 'pink']
 // The floating toolbar shown over a fresh selection.
 const pendingSelection = ref<
   { page: number; quads: Quad[]; text: string; x: number; y: number } | null>(null)
-// The highlight whose note is being edited.
+// The highlight whose popover is open — colour, note, remove.
+const activeHighlight = ref<{ id: number; x: number; y: number } | null>(null)
+// Separately, the note editor dialog.
 const editing = ref<{ id: number; note: string } | null>(null)
 const noteDraft = ref('')
+
+const activeHighlightRecord = computed(() =>
+  notes.highlights.value.find(h => h.id === activeHighlight.value?.id) ?? null)
 
 onMounted(() => notes.loadAll().catch(() => {}))
 
@@ -78,12 +83,33 @@ async function highlightSelection(colour: HighlightColour) {
   }
 }
 
-function openHighlight(id: number) {
-  const highlight = notes.highlights.value.find(h => h.id === id)
+function openHighlight(payload: { id: number; x: number; y: number }) {
+  // Clicking a highlight opens its own controls. Previously it went straight
+  // to the note editor, which left no way to change the colour or remove it —
+  // so a highlight, once made, was permanent.
+  activeHighlight.value = payload
+}
+
+function editNote() {
+  const highlight = activeHighlightRecord.value
   if (!highlight) return
-  editing.value = { id, note: highlight.note }
+  editing.value = { id: highlight.id, note: highlight.note }
   noteDraft.value = highlight.note
-  annotationsOpen.value = true
+  activeHighlight.value = null
+}
+
+async function recolour(colour: HighlightColour) {
+  const highlight = activeHighlightRecord.value
+  if (!highlight) return
+  await notes.updateHighlight(highlight.id, { colour })
+  activeHighlight.value = null
+}
+
+async function removeActiveHighlight() {
+  const highlight = activeHighlightRecord.value
+  if (!highlight) return
+  activeHighlight.value = null
+  await notes.removeHighlight(highlight.id)
 }
 
 async function saveNote() {
@@ -204,9 +230,10 @@ function onKey(event: KeyboardEvent) {
     toggleSearch()
     return
   }
-  if (event.key === 'Escape' && searchOpen.value) {
-    toggleSearch()
-    return
+  if (event.key === 'Escape') {
+    if (activeHighlight.value) { activeHighlight.value = null; return }
+    if (pendingSelection.value) { pendingSelection.value = null; return }
+    if (searchOpen.value) { toggleSearch(); return }
   }
 
   const actions: Record<string, () => void> = {
@@ -377,7 +404,7 @@ useHead({ title: computed(() => book.value ? `${book.value.title} — LumaIndex`
                      @position="onPosition"
                      @loaded="({ pageCount }) => (totalPages = pageCount)"
                      @error="msg => (readerError = msg)"
-                     @select="s => (pendingSelection = s)"
+                     @select="s => { pendingSelection = s; activeHighlight = null }"
                      @clear-selection="pendingSelection = null"
                      @open-highlight="openHighlight" />
           <template #fallback>
@@ -449,6 +476,26 @@ useHead({ title: computed(() => book.value ? `${book.value.title} — LumaIndex`
       <button v-for="colour in COLOURS" :key="colour" type="button"
               :class="['swatch', colour]" :title="`Highlight ${colour}`"
               @click="highlightSelection(colour)" />
+    </div>
+
+    <!-- Controls for an existing highlight -->
+    <div v-if="activeHighlight && activeHighlightRecord" class="highlight-popover"
+         :style="{ left: `${activeHighlight.x}px`, top: `${activeHighlight.y + 8}px` }">
+      <div class="swatches">
+        <button v-for="colour in COLOURS" :key="colour" type="button"
+                :class="['swatch', colour, { active: activeHighlightRecord.colour === colour }]"
+                :title="`Change to ${colour}`" @click="recolour(colour)" />
+      </div>
+      <div class="popover-actions">
+        <AppButton variant="ghost" size="sm" icon="pencil" @click="editNote">
+          {{ activeHighlightRecord.note ? 'Edit note' : 'Add note' }}
+        </AppButton>
+        <AppButton variant="ghost" size="sm" icon="trash" class="danger-action"
+                   @click="removeActiveHighlight">Remove</AppButton>
+      </div>
+      <p v-if="activeHighlightRecord.note" class="popover-note">
+        {{ activeHighlightRecord.note }}
+      </p>
     </div>
 
     <!-- Note editor -->
@@ -551,6 +598,21 @@ h1 { font-size: var(--text-base); font-weight: 500; margin: 0;
   border-radius: var(--radius); box-shadow: var(--shadow-lg);
 }
 .selection-bar .swatch { width: 22px; height: 22px; cursor: pointer; }
+
+.highlight-popover {
+  position: fixed; z-index: 60; transform: translateX(-50%);
+  display: grid; gap: var(--space-2); padding: var(--space-2);
+  min-width: 13rem; max-width: 18rem;
+  background: var(--surface-raised); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow-lg);
+}
+.highlight-popover .swatches { display: flex; gap: var(--space-2); }
+.highlight-popover .swatch { width: 22px; height: 22px; cursor: pointer; }
+.highlight-popover .swatch.active { box-shadow: 0 0 0 2px var(--accent); }
+.popover-actions { display: flex; gap: var(--space-1); }
+.popover-note { margin: 0; font-size: var(--text-xs); color: var(--text-secondary);
+                border-top: 1px solid var(--border); padding-top: var(--space-2); }
+:deep(.danger-action) { color: var(--danger-text); }
 :deep(.bookmarked) { color: var(--accent-text); }
 .stage-loading { display: grid; place-items: center; height: 100%; }
 

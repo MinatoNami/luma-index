@@ -205,3 +205,21 @@ def test_outline_requires_ownership(api, book, other_user):
     intruder = Client()
     intruder.force_login(other_user)
     assert intruder.get(reverse("library:book-outline", args=[book.pk])).status_code == 404
+
+
+@pytest.mark.django_db
+def test_progress_is_kept_on_a_book_that_has_not_been_probed_yet(api):
+    """A book opened before the ingest worker reaches it has no page count.
+
+    Clamping against an unknown count collapsed every position to page 0, so a
+    reader who opened a fresh upload lost their place.
+    """
+    api.post(reverse("library:upload"),
+             {"files": [SimpleUploadedFile("Fresh.pdf", make_pdf(pages=12))]},
+             headers=api.headers)
+    fresh = Book.objects.get()
+    assert fresh.page_count is None
+
+    put_progress(api, fresh, page=7, page_fraction=0.0)
+
+    assert api.get(reverse("library:book-progress", args=[fresh.pk])).json()["page"] == 7

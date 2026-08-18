@@ -267,6 +267,30 @@ class BookSource(models.Model):
         return self.availability_status == self.Availability.AVAILABLE
 
 
+class ShareAudit(models.Model):
+    """Who changed a book's visibility, and when.
+
+    One small table that answers the first question asked the first time
+    something is visible that should not have been.
+    """
+
+    book = models.ForeignKey(Book, on_delete=models.CASCADE, related_name="share_events")
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True,
+        related_name="share_events",
+    )
+    from_visibility = models.CharField(max_length=16)
+    to_visibility = models.CharField(max_length=16)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["book", "-created_at"])]
+
+    def __str__(self) -> str:
+        return f"{self.book}: {self.from_visibility} -> {self.to_visibility}"
+
+
 class ReadingProgress(models.Model):
     """Where a reader is in a book.
 
