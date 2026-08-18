@@ -24,6 +24,13 @@ function readCookie(name: string): string | null {
 
 export function useApi() {
   const config = useRuntimeConfig()
+  // Captured here, during setup, rather than inside the request function.
+  // Nuxt composables need an active instance, and that context is lost after
+  // the first `await` in an async handler — so a *second*, sequential request
+  // threw "[nuxt] instance unavailable". Parallel calls happened to survive,
+  // which is why a page fetching everything at once looked fine while one
+  // fetching a detail after a list rendered as empty.
+  const incomingHeaders = import.meta.server ? useRequestHeaders(['cookie']) : null
 
   async function api<T>(path: string, options: ApiOptions = {}): Promise<T> {
     const base = import.meta.server
@@ -34,10 +41,9 @@ export function useApi() {
       ...(options?.headers as Record<string, string> | undefined),
     }
 
-    if (import.meta.server) {
-      // Forward the browser's cookies through the SSR request (point 1 above).
-      const incoming = useRequestHeaders(['cookie'])
-      if (incoming.cookie) headers.cookie = incoming.cookie
+    // Forward the browser's cookies through the SSR request (point 1 above).
+    if (import.meta.server && incomingHeaders?.cookie) {
+      headers.cookie = incomingHeaders.cookie
     }
 
     const method = (options?.method ?? 'GET').toString().toUpperCase()

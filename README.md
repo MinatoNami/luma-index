@@ -193,7 +193,7 @@ has to be checked in a real browser.**
 | What | Consequence |
 | --- | --- |
 | **Per-user storage quotas** | A global maximum upload size and a free-disk floor exist, but nothing stops one account filling the disk. |
-| **Moving to an arbitrary folder** | The row menu offers "move up one level" only — no folder picker, no drag-onto-folder. The main place this feels less capable than Drive. |
+| **Drag to move** | There is a folder picker on every row now, but no drag-onto-folder. |
 | **Real email delivery** | Password reset works, but the console backend prints reset links into the log. Point `LUMA_EMAIL_BACKEND` at an SMTP relay before a second person has an account. |
 | **Off-box backups** | `deploy.sh backup` writes to the host it is backing up. The restore procedure itself has been rehearsed — see [the drill](docs/deployment.md#the-restore-drill) — but copying dumps and the `library` volume elsewhere is still manual. |
 | **Emptying the trash automatically** | Trashed items stay until deleted by hand. |

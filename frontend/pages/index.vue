@@ -31,6 +31,41 @@ const dialog = ref<{
 const fileInput = ref<HTMLInputElement | null>(null)
 let dragDepth = 0
 
+// What is being moved, if anything.
+const moving = ref<{ kind: 'folder' | 'book'; id: number; name: string
+                     currentFolder: number | null } | null>(null)
+const moveError = ref('')
+
+function startMove(item: Folder | Book, kind: 'folder' | 'book') {
+  moveError.value = ''
+  moving.value = {
+    kind,
+    id: item.id,
+    name: kind === 'folder' ? (item as Folder).name : (item as Book).title,
+    currentFolder: kind === 'folder' ? (item as Folder).parent : (item as Book).folder,
+  }
+}
+
+async function completeMove(destination: number | null) {
+  const item = moving.value
+  if (!item) return
+  busy.value = true
+  moveError.value = ''
+  try {
+    if (item.kind === 'folder') await library.updateFolder(item.id, { parent: destination })
+    else await library.updateBook(item.id, { folder: destination })
+    moving.value = null
+    notice.value = `Moved “${item.name}”.`
+    await load({ quiet: true })
+  } catch (err: any) {
+    // The server owns the cycle and depth rules; showing its message avoids
+    // restating them here and getting them subtly different.
+    moveError.value = err?.data?.detail || 'That move was not allowed.'
+  } finally {
+    busy.value = false
+  }
+}
+
 // The middleware seeds this from the account's saved preference. Changing it
 // here is a per-session override; Settings is where it is saved for good.
 watch(view, value => import.meta.client && localStorage.setItem('lumaindex-view', value))
@@ -38,7 +73,7 @@ watch(view, value => import.meta.client && localStorage.setItem('lumaindex-view'
 // Fetched during SSR, not in onMounted. Loading in onMounted meant the server
 // always rendered the skeleton — so every visit flashed placeholders before the
 // real content, and the Nuxt server was doing no useful work.
-const { data, pending, refresh: reload } = await useAsyncData(
+const { data, pending, error: loadError, refresh: reload } = await useAsyncData(
   'library-folder',
   async () => {
     const [folderList, bookList] = await Promise.all([
@@ -52,6 +87,16 @@ const { data, pending, refresh: reload } = await useAsyncData(
   },
   { watch: [currentId, search], default: () => ({ folders: [], books: [], detail: null }) },
 )
+
+// Surfaced rather than swallowed: a failed fetch used to render as an empty
+// folder, which is indistinguishable from a folder that really is empty.
+watch(loadError, (failure) => {
+  if (failure) {
+    const f = failure as any
+    error.value = f?.data?.detail || f?.message
+      || `Could not load this folder (${f?.statusCode ?? 'error'}).`
+  }
+}, { immediate: true })
 
 const folders = computed<Folder[]>(() => data.value?.folders ?? [])
 const books = computed<Book[]>(() => data.value?.books ?? [])
@@ -208,6 +253,7 @@ function deleteBook(book: Book) {
 function folderActions(folder: Folder) {
   return [
     { label: 'Rename', icon: 'pencil', run: () => renameFolder(folder) },
+    { label: 'Move to…', icon: 'folder', run: () => startMove(folder, 'folder') },
     ...(currentId.value !== null
       ? [{ label: 'Move up one level', icon: 'arrow-up', run: () => moveUp(folder, 'folder') }]
       : []),
@@ -240,6 +286,7 @@ function bookActions(book: Book) {
     { label: 'Open', icon: 'file', run: () => navigateTo(`/books/${book.id}`) },
     { label: 'Download', icon: 'download',
       run: () => window.open(`/api/library/books/${book.id}/content`, '_blank') },
+    { label: 'Move to…', icon: 'folder', run: () => startMove(book, 'book') },
     ...(currentId.value !== null
       ? [{ label: 'Move up one level', icon: 'arrow-up', run: () => moveUp(book, 'book') }]
       : []),
@@ -414,6 +461,12 @@ function itemLabel(folder: Folder): string {
         <span class="tertiary">PDFs, or a ZIP of them</span>
       </div>
     </div>
+
+    <FolderPicker v-if="moving" :title="`Move “${moving.name}”`"
+                  :exclude-folder-id="moving.kind === 'folder' ? moving.id : null"
+                  :current-folder-id="moving.currentFolder"
+                  :busy="busy" :error="moveError"
+                  @cancel="moving = null" @choose="completeMove" />
 
     <PromptDialog v-if="dialog" :title="dialog.title" :label="dialog.label"
                   :model-value="dialog.value" :confirm-label="dialog.confirmLabel"
