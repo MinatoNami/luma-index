@@ -21,8 +21,43 @@ const { data } = await useAsyncData(`book-${bookId.value}`, async () => {
 const book = computed(() => data.value?.book ?? null)
 const outline = computed(() => data.value?.outline ?? [])
 
-const reader = ref<{ goTo: (p: number, f?: number) => void; next: () => void
-                     previous: () => void } | null>(null)
+const reader = ref<{
+  goTo: (p: number, f?: number) => void
+  next: () => void
+  previous: () => void
+  search: (term: string) => Promise<void>
+  nextMatch: () => void
+  previousMatch: () => void
+  matchCount: number
+  activeMatchIndex: number
+  searching: boolean
+  doc: import('pdfjs-dist').PDFDocumentProxy | null
+} | null>(null)
+
+const thumbnails = ref(false)
+
+const searchOpen = ref(false)
+const searchTerm = ref('')
+const searchInput = ref<HTMLInputElement | null>(null)
+let searchDebounce: ReturnType<typeof setTimeout> | null = null
+
+// Debounced: a search sweeps every page, and firing that on each keystroke
+// would start a full-document pass per character.
+watch(searchTerm, (term) => {
+  if (searchDebounce) clearTimeout(searchDebounce)
+  searchDebounce = setTimeout(() => reader.value?.search(term), 350)
+})
+
+async function toggleSearch() {
+  searchOpen.value = !searchOpen.value
+  if (searchOpen.value) {
+    await nextTick()
+    searchInput.value?.focus()
+  } else {
+    searchTerm.value = ''
+    reader.value?.search('')
+  }
+}
 
 const mode = ref<'continuous' | 'single'>(settings.value?.reader_mode ?? 'continuous')
 const fit = ref<FitMode>(
@@ -102,6 +137,17 @@ onBeforeUnmount(() => {
 
 function onKey(event: KeyboardEvent) {
   if (event.target instanceof HTMLInputElement) return
+  if ((event.key === 'f' || event.key === 'F') && (event.metaKey || event.ctrlKey)
+      && book.value?.has_text_layer !== false) {
+    event.preventDefault()
+    toggleSearch()
+    return
+  }
+  if (event.key === 'Escape' && searchOpen.value) {
+    toggleSearch()
+    return
+  }
+
   const actions: Record<string, () => void> = {
     ArrowRight: () => reader.value?.next(),
     PageDown: () => reader.value?.next(),
@@ -122,6 +168,23 @@ function submitJump() {
   if (Number.isFinite(target) && target >= 1) reader.value?.goTo(target)
   jumpTo.value = ''
 }
+
+const { saveSettings } = useSettings()
+let prefsTimer: ReturnType<typeof setTimeout> | null = null
+
+// Debounced: toggling fit or mode a few times in a row should not be a request
+// each time.
+watch([mode, fit], ([nextMode, nextFit]) => {
+  if (prefsTimer) clearTimeout(prefsTimer)
+  prefsTimer = setTimeout(() => {
+    saveSettings({
+      reader_mode: nextMode,
+      // A numeric zoom is a per-session thing; only the fit modes are worth
+      // carrying to another device.
+      reader_zoom: typeof nextFit === 'number' ? 'fit-width' : nextFit,
+    }).catch(() => {})
+  }, 1200)
+})
 
 function zoomIn() {
   fit.value = typeof fit.value === 'number' ? Math.min(4, fit.value + 0.2) : 1.2
@@ -149,7 +212,10 @@ useHead({ title: computed(() => book.value ? `${book.value.title} — LumaIndex`
         </NuxtLink>
         <AppButton v-if="outline.length" variant="ghost" size="sm" icon-only icon="list-view"
                    :title="sidebar ? 'Hide contents' : 'Show contents'"
-                   @click="sidebar = !sidebar" />
+                   @click="sidebar = !sidebar; thumbnails = false" />
+        <AppButton variant="ghost" size="sm" icon-only icon="grid-view"
+                   :title="thumbnails ? 'Hide page thumbnails' : 'Show page thumbnails'"
+                   @click="thumbnails = !thumbnails; sidebar = false" />
         <h1>{{ book?.title }}</h1>
       </div>
 
@@ -167,6 +233,8 @@ useHead({ title: computed(() => book.value ? `${book.value.title} — LumaIndex`
       </div>
 
       <div class="right">
+        <AppButton v-if="book?.has_text_layer !== false" variant="ghost" size="sm" icon-only
+                   icon="search" title="Find in book (⌘F)" @click="toggleSearch" />
         <AppButton variant="ghost" size="sm" :title="'Zoom out'" @click="zoomOut">−</AppButton>
         <AppButton variant="ghost" size="sm"
                    :title="fit === 'fit-width' ? 'Fit page' : 'Fit width'"
@@ -183,6 +251,29 @@ useHead({ title: computed(() => book.value ? `${book.value.title} — LumaIndex`
                    @click="fullscreen" />
       </div>
     </header>
+
+    <div v-if="searchOpen" class="findbar">
+      <AppIcon name="search" :size="16" />
+      <input ref="searchInput" v-model="searchTerm" type="search"
+             placeholder="Find in book…" aria-label="Find in book"
+             @keydown.enter.prevent="reader?.nextMatch()"
+             @keydown.shift.enter.prevent="reader?.previousMatch()" />
+      <span class="count tertiary">
+        <template v-if="reader?.searching">searching…</template>
+        <template v-else-if="!searchTerm">&nbsp;</template>
+        <template v-else-if="reader?.matchCount">
+          {{ (reader?.activeMatchIndex ?? 0) + 1 }} of {{ reader?.matchCount }}
+        </template>
+        <template v-else>no matches</template>
+      </span>
+      <AppButton variant="ghost" size="sm" icon-only icon="arrow-up" title="Previous match"
+                 :disabled="!reader?.matchCount" @click="reader?.previousMatch()" />
+      <AppButton variant="ghost" size="sm" icon-only icon="arrow-up" class="flip-down"
+                 title="Next match" :disabled="!reader?.matchCount"
+                 @click="reader?.nextMatch()" />
+      <AppButton variant="ghost" size="sm" icon-only icon="close" title="Close"
+                 @click="toggleSearch" />
+    </div>
 
     <p v-if="book && book.has_text_layer === false" class="scanned notice notice-info">
       <AppIcon name="warning" :size="16" />
@@ -202,6 +293,10 @@ useHead({ title: computed(() => book.value ? `${book.value.title} — LumaIndex`
           </li>
         </ul>
       </aside>
+
+      <PageThumbnails v-if="thumbnails" :doc="reader?.doc ?? null"
+                      :page-count="totalPages" :current="page"
+                      @select="n => reader?.goTo(n)" />
 
       <div class="stage">
         <ClientOnly>
@@ -246,6 +341,15 @@ h1 { font-size: var(--text-base); font-weight: 500; margin: 0;
 .pct { font-size: var(--text-sm); min-width: 3rem; text-align: right; }
 
 .scanned { margin: var(--space-2) var(--space-3) 0; }
+
+.findbar {
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  flex: none;
+}
+.findbar input { width: min(18rem, 40vw); min-height: 32px; }
+.findbar .count { font-size: var(--text-sm); min-width: 6rem; }
 
 .body { flex: 1; min-height: 0; display: flex; }
 .outline {

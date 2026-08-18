@@ -58,7 +58,7 @@ export class PageRenderer {
   private tasks = new Map<number, RenderTask>()
   private pages = new Map<number, PDFPageProxy>()
 
-  constructor(private doc: PDFDocumentProxy) {}
+  constructor(readonly doc: PDFDocumentProxy) {}
 
   async page(number: number): Promise<PDFPageProxy> {
     let page = this.pages.get(number)
@@ -133,4 +133,88 @@ export function scaleFor(
   if (mode === 'fit-width') return Math.max(0.1, width)
   const height = (container.height - 32) / base.height
   return Math.max(0.1, Math.min(width, height))
+}
+
+
+/**
+ * Draws the selectable text over a rendered page.
+ *
+ * PDF.js positions transparent spans on top of the canvas; the pixels come from
+ * the canvas and the selection comes from these. Without it a PDF is a picture
+ * of a book — nothing to select, nothing to search, and nothing for Phase 5's
+ * highlights to anchor to.
+ */
+export async function renderTextLayer(
+  page: PDFPageProxy,
+  container: HTMLElement,
+  scale: number,
+): Promise<void> {
+  container.replaceChildren()
+  const viewport = page.getViewport({ scale })
+
+  // v4 positions spans from this custom property rather than inline styles.
+  container.style.setProperty('--scale-factor', String(scale))
+  container.style.width = `${Math.floor(viewport.width)}px`
+  container.style.height = `${Math.floor(viewport.height)}px`
+
+  const layer = new pdfjs.TextLayer({
+    textContentSource: await page.getTextContent(),
+    container,
+    viewport,
+  })
+  await layer.render()
+}
+
+/** The page's text as one string, for searching. */
+export async function pageText(page: PDFPageProxy): Promise<string> {
+  const content = await page.getTextContent()
+  return content.items
+    .map(item => ('str' in item ? item.str : ''))
+    .join('')
+}
+
+export interface SearchMatch {
+  page: number      // 1-indexed
+  index: number     // character offset within that page's text
+  text: string
+}
+
+/**
+ * Searches page by page, reporting as it goes.
+ *
+ * A 535-page book is not something to extract in one blocking pass, so this
+ * yields after each page and can be abandoned mid-way when the query changes.
+ */
+export async function* searchDocument(
+  doc: PDFDocumentProxy,
+  query: string,
+  cache: Map<number, string>,
+  signal: { cancelled: boolean },
+): AsyncGenerator<{ page: number; matches: SearchMatch[]; done: boolean }> {
+  const needle = query.trim().toLowerCase()
+  if (!needle) return
+
+  for (let number = 1; number <= doc.numPages; number += 1) {
+    if (signal.cancelled) return
+
+    let text = cache.get(number)
+    if (text === undefined) {
+      const page = await doc.getPage(number)
+      text = await pageText(page)
+      cache.set(number, text)
+      page.cleanup()
+    }
+
+    const haystack = text.toLowerCase()
+    const matches: SearchMatch[] = []
+    let from = 0
+    while (true) {
+      const at = haystack.indexOf(needle, from)
+      if (at === -1) break
+      matches.push({ page: number, index: at, text: text.slice(at, at + needle.length) })
+      from = at + needle.length
+    }
+
+    yield { page: number, matches, done: number === doc.numPages }
+  }
 }

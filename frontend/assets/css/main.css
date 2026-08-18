@@ -100,3 +100,41 @@ input[type="search"] { appearance: none; }
     transition-duration: 0.01ms !important;
   }
 }
+
+/* PDF.js text layer -------------------------------------------------------- */
+/* Transparent text positioned over the rendered canvas: the pixels come from
+   the canvas, the selection comes from here. Taken from pdf_viewer.css rather
+   than importing the whole viewer stylesheet, which also restyles a toolbar we
+   do not use. */
+.textLayer {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  line-height: 1;
+  text-align: initial;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  caret-color: CanvasText;
+  z-index: 1;
+}
+.textLayer span,
+.textLayer br {
+  position: absolute;
+  color: transparent;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+.textLayer ::selection {
+  background: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+/* A found term. `mark` inside the layer would inherit the transparent colour,
+   so the highlight is drawn as a background on a wrapper instead. */
+.textLayer .search-hit {
+  background: color-mix(in srgb, var(--warning) 55%, transparent);
+  border-radius: 2px;
+}
+.textLayer .search-hit.current {
+  background: color-mix(in srgb, var(--accent) 60%, transparent);
+}

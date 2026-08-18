@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { PageRenderer, loadPdf, scaleFor, type FitMode } from '~/composables/usePdf'
+import { PageRenderer, loadPdf, renderTextLayer, scaleFor, searchDocument,
+         type FitMode, type SearchMatch } from '~/composables/usePdf'
 
 /**
  * The reader.
@@ -61,6 +62,13 @@ const scale = ref(1)
 const baseSize = ref({ width: 612, height: 792 })
 const rendered = reactive(new Set<number>())
 
+const query = ref('')
+const matches = ref<SearchMatch[]>([])
+const activeMatch = ref(-1)
+const searching = ref(false)
+const textCache = new Map<number, string>()
+let searchSignal = { cancelled: false }
+
 let renderer: PageRenderer | null = null
 let observer: IntersectionObserver | null = null
 let restored = false
@@ -98,6 +106,13 @@ async function renderPage(number: number) {
       host.style.width = canvas.style.width
       host.style.height = canvas.style.height
     }
+
+    const textLayer = host?.querySelector('.textLayer') as HTMLElement | null
+    if (textLayer) {
+      const page = await renderer.page(number)
+      await renderTextLayer(page, textLayer, scale.value)
+      if (query.value) markHits(textLayer)
+    }
   } catch (error: any) {
     rendered.delete(number)
     emit('error', error?.message || 'A page failed to render.')
@@ -127,6 +142,8 @@ function releasePage(number: number) {
     // staying as wide as it was when it last rendered.
     host.style.removeProperty('width')
     host.style.removeProperty('height')
+    // The text layer is as expensive to keep as the canvas.
+    host.querySelector('.textLayer')?.replaceChildren()
   }
 }
 
@@ -242,7 +259,96 @@ function goTo(page: number, fraction = 0) {
   })
 }
 
-defineExpose({ goTo, next: () => goTo(current.value + 1), previous: () => goTo(current.value - 1) })
+/** Wrap occurrences of the query inside an already-rendered text layer. */
+function markHits(layer: HTMLElement) {
+  const needle = query.value.trim().toLowerCase()
+  if (!needle) return
+
+  for (const span of layer.querySelectorAll('span')) {
+    const text = span.textContent ?? ''
+    if (!text.toLowerCase().includes(needle)) continue
+
+    const fragment = document.createDocumentFragment()
+    let from = 0
+    while (true) {
+      const at = text.toLowerCase().indexOf(needle, from)
+      if (at === -1) break
+      fragment.append(text.slice(from, at))
+      const hit = document.createElement('span')
+      hit.className = 'search-hit'
+      hit.textContent = text.slice(at, at + needle.length)
+      fragment.append(hit)
+      from = at + needle.length
+    }
+    fragment.append(text.slice(from))
+    span.replaceChildren(fragment)
+  }
+}
+
+function remarkVisible() {
+  for (const [number, el] of hosts) {
+    if (!rendered.has(number) || !el.isConnected) continue
+    const layer = el.querySelector('.textLayer') as HTMLElement | null
+    if (!layer) continue
+    // Re-render the layer from scratch, since marking rewrites its spans.
+    renderer?.page(number).then(page => renderTextLayer(page, layer, scale.value)
+      .then(() => query.value && markHits(layer)))
+  }
+}
+
+async function runSearch(term: string) {
+  searchSignal.cancelled = true
+  searchSignal = { cancelled: false }
+  const signal = searchSignal
+
+  query.value = term
+  matches.value = []
+  activeMatch.value = -1
+
+  if (!term.trim() || !renderer) {
+    searching.value = false
+    remarkVisible()
+    return
+  }
+
+  searching.value = true
+  const doc = renderer.doc
+  const found: SearchMatch[] = []
+
+  for await (const batch of searchDocument(doc, term, textCache, signal)) {
+    if (signal.cancelled) return
+    if (batch.matches.length) {
+      found.push(...batch.matches)
+      matches.value = [...found]
+      // Jump to the first hit as soon as there is one, rather than making the
+      // reader wait for a 535-page sweep to finish.
+      if (activeMatch.value === -1) selectMatch(0)
+    }
+  }
+  searching.value = false
+  remarkVisible()
+}
+
+function selectMatch(index: number) {
+  if (!matches.value.length) return
+  const wrapped = (index + matches.value.length) % matches.value.length
+  activeMatch.value = wrapped
+  goTo(matches.value[wrapped].page)
+  nextTick(remarkVisible)
+}
+
+defineExpose({
+  doc: computed(() => renderer?.doc ?? null),
+  goTo,
+  next: () => goTo(current.value + 1),
+  previous: () => goTo(current.value - 1),
+  search: runSearch,
+  nextMatch: () => selectMatch(activeMatch.value + 1),
+  previousMatch: () => selectMatch(activeMatch.value - 1),
+  matchCount: computed(() => matches.value.length),
+  activeMatchIndex: computed(() => activeMatch.value),
+  searching: computed(() => searching.value),
+})
 
 onMounted(async () => {
   try {
@@ -280,6 +386,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  searchSignal.cancelled = true
   hosts.clear()
   observer?.disconnect()
   renderer?.destroy()
@@ -335,6 +442,7 @@ onBeforeUnmount(() => resizeObserver?.disconnect())
            :ref="el => registerHost(number, el as Element | null)"
            :data-page="number" :style="pageStyle">
         <canvas />
+        <div class="textLayer" />
         <span v-if="!rendered.has(number)" class="page-number">{{ number }}</span>
       </div>
     </div>
@@ -366,7 +474,7 @@ onBeforeUnmount(() => resizeObserver?.disconnect())
   place-items: center;
   flex: none;
 }
-.page canvas { display: block; border-radius: 2px; }
+.page canvas { display: block; border-radius: 2px; position: relative; z-index: 0; }
 .page-number {
   position: absolute; color: var(--text-tertiary); font-size: var(--text-sm);
 }
