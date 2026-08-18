@@ -357,6 +357,9 @@ LOGGING = {
     "root": {"handlers": ["console"], "level": env("DJANGO_LOG_LEVEL", "INFO")},
     "loggers": {
         "django.request": {"level": "WARNING", "propagate": True},
+        # httpx logs every request at INFO, which buries our own lines.
+        "httpx": {"level": "WARNING", "propagate": True},
+        "httpcore": {"level": "WARNING", "propagate": True},
         "lumaindex": {"level": env("DJANGO_LOG_LEVEL", "INFO"), "propagate": True},
     },
 }

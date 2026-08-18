@@ -7,6 +7,11 @@ database advisory lock gives mutual exclusion without adding Redis, which PRD
 
 Session-scoped rather than transaction-scoped: these guard long operations
 (a Drive walk, a download) that should not be wrapped in one transaction.
+
+Note that PostgreSQL advisory locks are re-entrant *within a session*. The
+mutual exclusion is between database connections — which is what we want, since
+the contenders are separate processes (gunicorn workers and the sync worker) —
+but two calls on the same connection will both succeed.
 """
 
 from __future__ import annotations
