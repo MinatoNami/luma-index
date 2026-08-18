@@ -7,7 +7,7 @@ which of the 31 MVP success criteria (§45) it proves.
 | Phase | Status | Document |
 | --- | --- | --- |
 | 1 — Platform foundation | **Built** | see the repository and [deployment.md](../deployment.md) |
-| 2 — Google Drive | **Backend built** | [02-google-drive.md](02-google-drive.md) |
+| 2 — Uploads, folders, storage | **Built** | [02-uploads.md](02-uploads.md) |
 | 3 — Library | Scoped | [03-library.md](03-library.md) |
 | 4 — PDF reader | Scoped | [04-reader.md](04-reader.md) |
 | 5 — Bookmarks, highlights, notes | Scoped | [05-reading-data.md](05-reading-data.md) |
@@ -24,22 +24,24 @@ is discovered late.
 
 | # | Decision | Where | Why it cannot wait |
 | --- | --- | --- | --- |
-| 1 | **Google OAuth scope route** | [Phase 2 D1](02-google-drive.md) · [google-oauth.md](../google-oauth.md) | Restricted scopes need verification plus a paid security assessment; Testing mode expires every refresh token after 7 days. Gates all of Phase 2. |
-| 2 | **PDF rendering library** | [Phase 2 D2](02-google-drive.md) | PyMuPDF is AGPL. Swapping it after it is woven through import, search, and the reader is a rewrite. |
-| 3 | **Where sync executes** | [Phase 2 D3](02-google-drive.md) | A large first import cannot run inside a request. Choosing wrong means retrofitting a worker later. |
+| 1 | ~~Google OAuth scope route~~ | — | **Moot.** Drive was removed in favour of uploads. |
+| 2 | **PDF rendering library** | [Phase 2](02-uploads.md) | Settled: pypdfium2 (Apache-2.0). PyMuPDF is AGPL, and swapping it after it is woven through import, search, and the reader is a rewrite. |
+| 3 | **Where ingestion executes** | [Phase 2](02-uploads.md) | Settled: a polling worker. A ZIP of several hundred books cannot be extracted inside a request. |
 | 4 | **How PDF bytes reach the browser** | [Phase 4 D1](04-reader.md) | Range support and not blocking a worker per download. Shapes the content endpoint's signature. |
 | 5 | **Highlight anchoring format** | [Phase 5 D1](05-reading-data.md) | Once highlights exist, the coordinates cannot be recomputed — the mapping depended on a viewport that is gone. |
 | 6 | **The deletion matrix** | [Phase 6 D1](06-sharing.md) | §33 leaves it undefined. Every FK needs an explicit `on_delete`, and getting it wrong destroys other people's annotations. |
 
-If you only settle a few things before writing Phase 2, settle 1, 2 and 6 —
-they are the ones whose cost grows fastest.
+Decisions 1–3 are settled. **4, 5 and 6 are still open** and all three get
+harder the longer they wait: PDF delivery shapes the reader endpoint, the
+highlight format cannot be migrated once highlights exist, and the deletion
+matrix decides what happens to other people's annotations.
 
 ## Dependency order
 
 ```text
 Phase 1  platform          ✅ built
    │
-Phase 2  Google Drive      Book + BookSource — everything else assumes these
+Phase 2  uploads + folders ✅ built — Book + BookSource, which the rest assumes
    │
    ├── Phase 3  library    collections, search, virtual views
    │      │

@@ -25,6 +25,14 @@ Listed so they do not get re-litigated later.
 
 ---
 
+> **Superseded in part.** Google Drive was removed in favour of
+> uploads (see [phases/02-uploads.md](phases/02-uploads.md)), so items 1–5
+> and 12's Drive framing no longer apply. Items 6–11 and 13–16 stand, and
+> two new ones matter more now: uploaded PDFs are canonical and must be
+> backed up with the database, and nothing caps per-user storage.
+
+---
+
 ## Decide before Phase 2 (Google Drive)
 
 ### 1. Google OAuth scope and verification — the biggest risk in the project
@@ -34,7 +42,7 @@ priced for companies. Staying in "Testing" mode avoids that, but **refresh
 tokens then expire after 7 days** — Drive sync breaks roughly weekly for every
 user.
 
-**Action:** pick a route from [google-oauth.md](google-oauth.md) — Testing mode
+**Action:** pick a route from `docs/google-oauth.md` (removed with the Drive integration) — Testing mode
 (accept weekly reconnects), Workspace-internal (best if available), or
 `drive.file` + Picker (no verification, different import UX). Do this before
 writing sync code; it changes the model.

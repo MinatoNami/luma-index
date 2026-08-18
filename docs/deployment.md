@@ -118,13 +118,24 @@ container and writes a gzipped plain-SQL dump to `/opt/lumaindex/backups/`.
 Plain SQL rather than a custom-format dump on purpose: it still restores after
 a PostgreSQL major-version change, which is exactly when you need it most.
 
-Two things the dump does **not** contain:
+**The dump is only half the backup.** It contains the metadata — users,
+folders, book records, sharing, and eventually reading state — but not the
+PDFs themselves. Those live in the `library` volume and are **canonical**:
+LumaIndex is the only place they exist, unless the user still has the original
+upload. A database dump alone restores an empty library that knows the names of
+books nobody can open.
 
-- `LUMA_FIELD_ENCRYPTION_KEY`. Without it the encrypted OAuth tokens in the
-  dump are unreadable. Keep the key in a password manager. Keeping it *only*
-  next to the backup defeats the point of encrypting the column.
-- The PDF cache and thumbnails. Both regenerate from Drive; PRD §38 says not to
-  back them up, and they are the bulk of the disk.
+So back up the volume too:
+
+```bash
+ssh USER@HOST "sudo tar -C /var/lib/docker/volumes/lumaindex_library -czf - ." > library.tar.gz
+```
+
+Thumbnails and staging need no backup: thumbnails re-render from the PDFs, and
+staging holds only in-flight uploads.
+
+This is a change from the Drive-backed design, where the local copy was a cache
+and PRD §38 correctly said not to back it up. Owning the storage inverts that.
 
 A restore you have never tested is a hypothesis. Test it:
 
@@ -165,4 +176,5 @@ docker compose run --rm --user root backend sh -c "pip install -q -r requirement
 | `CSRF verification failed` | `DJANGO_CSRF_TRUSTED_ORIGINS` does not exactly match the origin in the browser, scheme included. |
 | Deploy says it cannot reach the docker daemon | The `docker` group was just added. Disconnect and reconnect the SSH session once. |
 | `tailscale serve` fails during bootstrap | HTTPS certificates are not enabled for the tailnet. Admin console → DNS → HTTPS Certificates. |
-| Sync stops working about weekly | Google OAuth consent screen is in Testing mode; refresh tokens expire after 7 days. See [google-oauth.md](google-oauth.md). |
+| Uploads fail with a 500 | A storage volume is not writable by the container. `entrypoint.sh` now refuses to start in that case and names the directory. |
+| Uploads rejected with 507 | Disk is below `LUMA_MIN_FREE_DISK_BYTES`. Storage is canonical and cannot evict to recover — free space or add a disk. |

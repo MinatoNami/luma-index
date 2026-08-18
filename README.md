@@ -2,7 +2,9 @@
 
 A self-hosted, multi-user web application for browsing, organizing, sharing, and reading PDF ebooks.
 
-Users sign in with a normal application account — no Google account required. Users who *do* connect Google Drive can import PDFs recursively from folders they select, while Drive remains the source of truth for those files. Everything else — identity, library metadata, collections, sharing, reading progress, bookmarks, highlights, and notes — lives in Django/PostgreSQL.
+Users sign in with a normal application account, upload their PDFs — one at a time, or as a ZIP whose folder structure is rebuilt on import — and organise them in folders they can create, rename, move, and delete. LumaIndex owns the files; everything else lives in Django/PostgreSQL.
+
+> **Note:** the PRD in this repository specifies Google Drive as canonical storage. That was built and then removed in favour of uploads. Where the PRD and this README disagree about storage, this README is current; the PRD remains the reference for the reader, sharing, and annotation phases still to come.
 
 Designed to run on an Ubuntu server behind Tailscale, and to be read from desktop, tablet, and mobile browsers.
 
@@ -10,19 +12,22 @@ Designed to run on an Ubuntu server behind Tailscale, and to be read from deskto
 
 ## Status
 
-**Phase 1 — platform foundation — is built and deployable.** Everything from
-Phase 2 onward (Google Drive, the library, the reader) is still to come.
+**Phases 1 and 2 are built.** The reader, sharing, and annotations are still
+to come.
 
 Working today: Docker Compose stack, PostgreSQL, Django + DRF with a custom
-user model, session-cookie authentication, Django Admin, an OpenAPI schema, a
-Nuxt frontend with sign-in, and a one-command SSH deploy to Ubuntu behind
-Tailscale.
+user model, session-cookie authentication with password reset, Django Admin, an
+OpenAPI schema, PDF and ZIP upload with folder-structure import, a folder tree
+with rename/move/trash, content-addressed storage, an ingest worker that probes
+page counts and renders thumbnails, a Nuxt file browser, and a one-command SSH
+deploy to Ubuntu behind Tailscale.
+
+Not built yet: the PDF reader, reading progress, bookmarks, highlights, and
+sharing.
 
 - [lumaindex-prd.md](lumaindex-prd.md) — the full PRD, and the source of truth
   for scope and behaviour. Where this README and the PRD disagree, the PRD wins.
 - [docs/deployment.md](docs/deployment.md) — deploying, backups, troubleshooting.
-- [docs/google-oauth.md](docs/google-oauth.md) — **read before Phase 2.** The
-  Drive scope decision has consequences that are expensive to reverse.
 - [docs/open-questions.md](docs/open-questions.md) — gaps the PRD leaves open,
   with the decision each one needs and when it has to be made.
 - [docs/phases/](docs/phases/) — Phases 2–7 scoped: data models, APIs, risks,
@@ -63,13 +68,12 @@ Full walkthrough in [docs/deployment.md](docs/deployment.md).
 ## Core principles
 
 1. The **Django user is the canonical application identity**. Google is not.
-2. A Google account is optional; Google Drive is an optional *storage provider*, not an identity requirement.
-3. **Books are private by default.**
-4. Shared books are readable by any authenticated user on the instance — including users with no Google account.
-5. Reading progress, bookmarks, highlights, and notes are **always per-user and private by default**.
-6. Application collections never modify the original Google Drive structure.
-7. Google Drive stays canonical storage for imported PDFs.
-8. **Authorization is always enforced server-side by Django** — never by hiding UI in Nuxt.
+2. **Books are private by default.**
+3. Shared books are readable by any authenticated user on the instance.
+4. Reading progress, bookmarks, highlights, and notes are **always per-user and private by default**.
+5. Uploaded files are **canonical and irreplaceable** — nothing is ever evicted to reclaim space, and deletion is reversible until it is explicitly made permanent.
+6. Uploaded archives are **hostile input** until proven otherwise.
+7. **Authorization is always enforced server-side by Django** — never by hiding UI in Nuxt.
 
 ---
 
@@ -78,9 +82,9 @@ Full walkthrough in [docs/deployment.md](docs/deployment.md).
 | Layer | Choice |
 | --- | --- |
 | Frontend | Nuxt 3, Vue 3, TypeScript, PDF.js |
-| Backend | Django, Django REST Framework, django-allauth |
+| Backend | Django, Django REST Framework |
 | Database | PostgreSQL |
-| External | Google OAuth, Google Drive API |
+| Documents | pypdfium2 (probing, thumbnails), Pillow |
 | Deployment | Docker Compose, Ubuntu Server, Tailscale |
 
 Celery and Redis are deliberately **not** part of the initial build. They get introduced only when an asynchronous workload actually justifies them (large Drive syncs, thumbnail generation at scale, OCR, AI indexing).
@@ -90,41 +94,33 @@ Celery and Redis are deliberately **not** part of the initial build. They get in
 ## Architecture
 
 ```text
-                    Google Drive
-                         |
-                  Google Drive API
-                         |
-                         v
-                 ┌────────────────┐
-                 │ Django Backend │
-                 │                │
-                 │ DRF API        │
-                 │ Authentication │
-                 │ Authorization  │
-                 │ Drive Sync     │
-                 │ Book Sharing   │
-                 │ PDF Delivery   │
-                 └───────┬────────┘
-                         |
-              ┌──────────┼───────────┐
-              v          v           v
-         PostgreSQL   PDF Cache   Thumbnails
-              ^
-              |
-          REST API
-              |
-              v
-          ┌────────┐
-          │ Nuxt 3 │
-          │ PDF.js │
-          └────┬───┘
-               |
-           Tailscale
-               |
        Desktop / Tablet / Mobile
+                 |
+             Tailscale
+                 |
+          ┌──────┴──────┐
+          │    Caddy    │   one origin: /api → Django, everything else → Nuxt
+          └──┬───────┬──┘
+             │       │
+        ┌────┴───┐ ┌─┴──────────────┐
+        │ Nuxt 3 │ │ Django + DRF   │
+        │ PDF.js │ │ auth, authz,   │
+        └────────┘ │ uploads, ZIP   │
+                   │ import, PDF    │
+                   │ delivery       │
+                   └──┬──────────┬──┘
+                      │          │
+              ┌───────┴──┐   ┌───┴──────────────┐
+              │PostgreSQL│   │ library/  (PDFs) │  canonical — back this up
+              └──────────┘   │ thumbnails/      │  regenerable
+                      ▲      │ staging/         │  scratch
+                      │      └──────────────────┘
+              ┌───────┴────────┐
+              │ ingest worker  │  extracts ZIPs, probes PDFs, renders covers
+              └────────────────┘
 ```
 
-Every PDF byte a reader receives passes through Django's authorization boundary. Django may fetch and cache a PDF using the *owner's* Drive connection, but the owner's Drive credentials are never exposed to readers, and the cache directory is never served as unrestricted static content.
+Every PDF byte a reader receives passes through Django's authorization boundary, and the storage directory is never served as static content.
 
 ---
 
@@ -160,18 +156,19 @@ Django apps should stay loosely coupled.
 The key design decision is separating a **logical book** from its **storage source**:
 
 ```text
-Book ──> BookSource ──> Google Drive
-                        (later: local upload, Dropbox, OneDrive)
+Book ──> BookSource ──> local storage
+                        (later: a replaced file, or another provider)
 ```
 
-This lets new storage providers be added without redesigning the library or reader domains.
+This lets the bytes behind a book change — a better scan, a different provider — without touching its annotations.
 
-The other structural split is **source organization vs. logical organization**:
+Storage is **content-addressed**: a file's SHA-256 is both its identity and its path. Uploading the same PDF twice stores one copy, so retrying a half-finished ZIP import costs no extra disk; a blob is deleted only once no book references it.
 
-- Drive folders describe where a file physically lives, and are preserved on import (file ID, parent ID, original path, filename, MIME type, size, modified timestamp).
-- Application collections are independent, user-owned, nestable, and many-to-many with books. The same book can sit in *Currently Reading*, *Software Engineering*, and *Favourites* at once without duplicating the PDF — and moving it between collections never touches Drive.
+Folders are a plain tree, owned by the user, with the invariants enforced in the model: no cycles, a depth cap, and unique names per parent.
 
-Principal entities: `User` (custom model, email as login identifier), `DriveConnection`, `DriveRoot`, `Book`, `BookSource`, `Collection`, `CollectionBook`, `ReadingProgress` (unique per `user, book`), `Bookmark`, `Highlight`, `UserSettings`. Field-level detail is in [§28 of the PRD](lumaindex-prd.md).
+Deletion is a **trash**. An uploaded PDF may be the only copy its owner has, so deleting is reversible and permanent deletion is a separate, explicit step.
+
+Principal entities: `User` (custom model, email as login identifier), `Folder`, `Book`, `BookSource`, `UploadBatch`. Still to come: `ReadingProgress`, `Bookmark`, `Highlight`, `UserSettings`.
 
 ---
 
@@ -180,22 +177,19 @@ Principal entities: `User` (custom model, email as login identifier), `DriveConn
 REST via DRF, with an OpenAPI schema and browsable docs in development.
 
 ```text
-/api/auth/          /api/library/       /api/reader/
-/api/users/         /api/books/         /api/shared/
-/api/drive/         /api/collections/
+GET    /api/library/folders/            POST   /api/library/upload/
+POST   /api/library/folders/            GET    /api/library/uploads/
+PATCH  /api/library/folders/{id}/       GET    /api/library/uploads/{id}/
+DELETE /api/library/folders/{id}/       GET    /api/library/trash/
+POST   /api/library/folders/{id}/restore/
+                                        GET    /api/library/storage/
+GET    /api/library/books/
+PATCH  /api/library/books/{id}/         GET    /api/library/books/{id}/content
+DELETE /api/library/books/{id}/         GET    /api/library/books/{id}/thumbnail
+POST   /api/library/books/{id}/restore/
 ```
 
-Representative endpoints:
-
-```text
-GET    /api/books/                      GET    /api/books/{id}/progress
-GET    /api/books/{id}/                 PUT    /api/books/{id}/progress
-GET    /api/books/{id}/content          GET    /api/books/{id}/bookmarks
-PATCH  /api/books/{id}/                 POST   /api/books/{id}/highlights
-
-GET    /api/collections/                POST   /api/drive/connect/
-GET    /api/shared/books/               POST   /api/drive/sync/
-```
+`?permanent=true` on a delete empties it from the trash for good; without it, the item is recoverable.
 
 Object-level permissions apply to API endpoints, PDF streaming, cache access, thumbnails, modifications, and sharing actions alike.
 
@@ -204,10 +198,10 @@ Object-level permissions apply to API endpoints, PDF streaming, cache access, th
 ## Security model
 
 - HttpOnly, secure, correctly-`SameSite`d session cookies; CSRF protection. Auth tokens are not kept in `localStorage`.
-- Google OAuth refresh tokens are **encrypted at rest**, never logged, never returned to other users, and never displayed in plaintext in Django Admin.
-- The least-privileged Drive scope that supports recursive folder reading — scope choice must be validated early, since broader scopes trigger additional Google verification requirements.
+- Uploaded archives are treated as hostile: zip-slip paths, symlink entries, compression bombs, and entries lying about their size are all rejected before anything is written.
+- Uploads are sniffed for `%PDF-` rather than trusted by extension or content type.
+- Authentication is rate-limited per address **and** per targeted account.
 - `DEBUG=False`, restrictive `ALLOWED_HOSTS`, correct trusted origins, non-root containers, secrets via environment/Docker secrets.
-- Sharing a book inside LumaIndex never changes its Google Drive sharing permissions.
 - Failure modes (revoked OAuth, deleted or moved Drive files, Drive API outages, corrupt or encrypted PDFs) must never silently destroy a user's reading state or annotations. Unavailable sources get marked, not deleted.
 
 ---
@@ -234,7 +228,7 @@ the LAN or the internet.
 | Phase | Scope |
 | --- | --- |
 | 1 — Platform foundation ✅ | Docker Compose, PostgreSQL, Django + DRF, custom User model, Nuxt, authentication, Django Admin, Tailscale deployment |
-| [2 — Google Drive](docs/phases/02-google-drive.md) | Account linking, Drive OAuth, connection model, root folder selection, recursive PDF discovery, initial sync, PDF cache, thumbnails |
+| [2 — Uploads & folders](docs/phases/02-uploads.md) ✅ | PDF and ZIP upload, content-addressed storage, folder tree with rename/move/trash, ingest worker, thumbnails |
 | [3 — Library](docs/phases/03-library.md) | Grid/list views, imported Drive hierarchy, search, sort, filters, nested collections, Favourites, Continue Reading, Unsorted |
 | [4 — PDF reader](docs/phases/04-reader.md) | PDF.js, navigation, continuous/single-page modes, zoom, in-document search, table of contents, page thumbnails, preferences, progress sync |
 | [5 — Reading data](docs/phases/05-reading-data.md) | Bookmarks, highlights, notes |
@@ -250,6 +244,6 @@ The MVP is judged against the 31 success criteria in [§45 of the PRD](lumaindex
 
 ## Non-goals for the MVP
 
-EPUB, MOBI/AZW, DRM, OCR, AI features, semantic/vector search, audiobooks, anonymous or public reading, open public registration, complex sharing ACLs, groups, PDF editing, modifying Drive folders, Dropbox, OneDrive, and native mobile apps.
+EPUB, MOBI/AZW, DRM, OCR, AI features, semantic/vector search, audiobooks, anonymous or public reading, open public registration, complex sharing ACLs, groups, PDF editing, and native mobile apps.
 
 Several of these — PWA offline reading, OCR, EPUB, tags, ratings, reading statistics, annotation export, AI Q&A and semantic search over pgvector — are listed as plausible future work in [§43 of the PRD](lumaindex-prd.md). The architecture should leave room for them without being built for them now.

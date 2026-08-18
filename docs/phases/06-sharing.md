@@ -1,8 +1,7 @@
 # Phase 6 — Sharing
 
 **Goal:** an owner marks a book shared; any authenticated user on the instance
-can read it, with their own progress and annotations, and **without any access
-to the owner's Google Drive**.
+can read it, with their own progress and annotations.
 
 **Depends on:** Phases 2–5.
 
@@ -17,12 +16,12 @@ written into `on_delete` and tested with two users:
 
 | Event | Owner's data | **Other readers' progress, bookmarks, highlights** |
 | --- | --- | --- |
-| Owner deletes their account | Books removed | **Decide.** Cascade, or retain orphaned? |
+| Owner deletes their account | Books and uploaded files removed | **Decide.** Cascade, or retain orphaned? |
 | Owner disables their account (admin) | Retained | Decide: still readable, or hidden? |
 | Owner flips SHARED → PRIVATE | Retained | Retained but inaccessible — must not be deleted |
 | Owner deletes one book | Removed | Cascade with the book |
-| Drive file goes missing | Source marked unavailable | Untouched (§13) |
-| Owner disconnects Drive | Books retained, sources orphaned | Untouched (§33) |
+| Stored file goes missing from disk | Source marked unavailable | Untouched |
+| Owner empties their trash | Books and files gone | Cascade with the book |
 
 Recommendation, matching §33's own suggestion:
 
@@ -41,21 +40,20 @@ the two-user cases. It is the difference between a considered policy and
 whatever Django's defaults happened to be.
 
 ### D2. How a shared reader gets bytes
-The reader has no Drive access — that is the whole point (§18).
+Much simpler than it was under the Drive design: the file is already on this
+server, so Django authorizes the request and streams it. There is no third
+party in the path and no owner credential to protect.
 
-Recommendation: Django fetches and caches using the **owner's**
-`DriveConnection`, then serves from cache to any authorized reader. Consequences
-to handle deliberately:
+Two rules still hold, and both are about *not* letting the storage layer become
+an access-control boundary:
 
-- If the owner's token has expired, a shared read fails for a file not yet
-  cached. Return a clear "temporarily unavailable" state, never the owner's
-  error detail, and never anything about the owner's credentials.
-- A cached file outliving the share is a leak. **Authorization is checked on
-  every request, including cache hits** — the cache is a performance detail, not
-  an access-control boundary.
-- The owner's `provider_file_id`, `original_path`, and Drive account must not
-  appear in any response to a non-owner. §15 asks for the Drive path in the
-  library view; that field is for the owner only.
+- **Authorization is checked on every request.** A book that stops being shared
+  must stop being readable immediately, including for someone who fetched it a
+  moment ago.
+- **Owner-only fields stay owner-only.** The original filename and the folder
+  path describe the owner's organisation, not the book, and a non-owner has no
+  business seeing them. Serve them from a separate serializer rather than a
+  conditional inside a shared one — conditionals are where the leak hides.
 
 ### D3. Do not build ACLs
 §16 is explicit: `PRIVATE` and `SHARED`, nothing more. The future list
@@ -79,7 +77,7 @@ Almost nothing new — `Book.visibility` already exists from Phase 2. What
 changes is that every queryset now considers shared books.
 
 ```text
-Book.visibility   PRIVATE | SHARED     (default PRIVATE, PRD §16)
+Book.visibility   PRIVATE | SHARED     (default PRIVATE, PRD §16 — already built)
 
 ShareAudit                             optional but recommended
   book, actor, from_visibility, to_visibility, created_at
@@ -135,10 +133,10 @@ to be one shared, tested function.
 | Risk | Mitigation |
 | --- | --- |
 | A private book leaks through a path that forgot to check | One `can_read`, called everywhere; a permission test matrix in Phase 7. |
-| Cached PDF served after un-sharing | Authorization on every request, cache hits included. Test un-share then re-request. |
-| Owner's Drive identity leaks to readers | Separate owner/reader serializers; assert absence in tests. |
+| A stored PDF served after un-sharing | Authorization on every request. Test un-share then re-request. |
+| Owner's filenames and folder paths leak to readers | Separate owner/reader serializers; assert absence in tests. |
 | Un-sharing destroys other people's annotations | D1: retain on un-share. |
-| Non-Google user cannot read a shared book | §17's whole point — test with a user who has no `DriveConnection` at all. |
+| A reader who uploaded nothing cannot read a shared book | Test with a user whose own library is empty — that is §17's whole point. |
 
 ## Acceptance (PRD §45)
 
