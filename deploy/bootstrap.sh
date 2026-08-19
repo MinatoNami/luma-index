@@ -18,6 +18,20 @@
 #
 set -euo pipefail
 
+# NOT SAFE ON A SHARED HOST. This assumes the machine is LumaIndex's: it
+# rewrites ufw's rules, may restart the Docker daemon (bouncing every container
+# on the box, not just ours), and points `tailscale serve` at port 443.
+#
+# On a server already running something else, skip this and do the three things
+# it exists for by hand:
+#
+#   1. install docker + compose, and put the deploy user in the docker group
+#   2. sudo mkdir -p $DEPLOY_PATH/{releases,shared,backups} && chown it to that user
+#   3. tailscale serve --bg --https=<free port> http://127.0.0.1:8080
+#
+# That is exactly how alena-server was set up, where nginx already owned 443
+# and four unrelated containers had been up for weeks.
+
 DEPLOY_PATH="${DEPLOY_PATH:-/opt/lumaindex}"
 DEPLOY_USER="${DEPLOY_USER:-ubuntu}"
 CADDY_PORT="${CADDY_HTTP_PORT:-8080}"

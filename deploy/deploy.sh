@@ -83,18 +83,33 @@ load_config() {
     SSH_TARGET="${DEPLOY_USER}@${DEPLOY_HOST}"
 
     # A shared connection turns ~12 SSH handshakes per deploy into one.
-    CONTROL_PATH="${TMPDIR:-/tmp}/lumaindex-ssh-$(echo "$SSH_TARGET" | tr -c 'a-zA-Z0-9' '_')"
+    #
+    # Short and hashed rather than under TMPDIR: a Unix socket path is capped
+    # near 104 characters, macOS hands out a 47-character TMPDIR, and ssh
+    # appends its own suffix while connecting — which overflowed and failed
+    # every command with "path too long for Unix domain socket". %C is ssh's
+    # own hash of user, host and port, so it stays unique per target.
+    CONTROL_PATH="/tmp/lumaindex-%C"
     SSH_OPTS=(-p "$DEPLOY_PORT"
               -o ControlMaster=auto
               -o "ControlPath=$CONTROL_PATH"
               -o ControlPersist=120
               -o ConnectTimeout=10)
-    [ -n "${DEPLOY_SSH_KEY:-}" ] && SSH_OPTS+=(-i "$DEPLOY_SSH_KEY")
+    # An `if` rather than `&&`: this is the last statement in the function, and
+    # a false `&&` makes the function return 1, which under `set -e` kills the
+    # script before it has printed a single line. Leaving DEPLOY_SSH_KEY blank —
+    # the documented way to use your ssh-agent — did exactly that.
+    if [ -n "${DEPLOY_SSH_KEY:-}" ]; then
+        SSH_OPTS+=(-i "$DEPLOY_SSH_KEY")
+    fi
 }
 
 cleanup() {
-    [ -n "${CONTROL_PATH:-}" ] && [ -S "$CONTROL_PATH" ] && \
-        ssh -O exit -o "ControlPath=$CONTROL_PATH" "$SSH_TARGET" 2>/dev/null || true
+    # ssh expands %C here too, so the socket is found without this having to
+    # know the hash — which is also why it cannot simply test -S first.
+    [ -n "${SSH_TARGET:-}" ] || return 0
+    ssh -O exit -o "ControlPath=$CONTROL_PATH" -p "${DEPLOY_PORT:-22}" \
+        "$SSH_TARGET" 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -209,7 +224,9 @@ cmd_env_push() {
     # file on the server and never appear in a process list.
     rexec "cat > '$DEPLOY_PATH/shared/.env' && chmod 600 '$DEPLOY_PATH/shared/.env'" < "$src"
     ok "Uploaded (mode 600)"
-    dim "Reminder: LUMA_FIELD_ENCRYPTION_KEY must also live somewhere outside this server."
+    dim "Reminder: keep a copy of this .env somewhere off the server — the
+    backups do not contain it, and DJANGO_SECRET_KEY invalidates every
+    session if it is lost and regenerated."
 }
 
 sync_code() {
@@ -440,9 +457,9 @@ cmd_backup() {
     backup_prune_dumps "$root"
 
     ok "Backup complete: $root"
-    warn "This backup does NOT contain LUMA_FIELD_ENCRYPTION_KEY or the rest of
-    .env. Store those separately — without them the dump restores, but the
-    encrypted fields inside it do not."
+    warn "This backup does NOT contain .env. Keep a copy of that somewhere else:
+    the dump restores without it, but DJANGO_SECRET_KEY and the database
+    password do not come back with it."
 }
 
 backup_database() {

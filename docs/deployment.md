@@ -19,6 +19,29 @@ terminates TLS and is the only way in.
                           postgres  (:5432, never published)
 ```
 
+## Deploying onto a host that already does something else
+
+`bootstrap.sh` assumes the machine is LumaIndex's. It rewrites ufw's rules, can
+restart the Docker daemon — bouncing every container on the box — and points
+`tailscale serve` at 443. On a shared server all three are destructive, so skip
+it and do its three jobs by hand:
+
+1. Install docker and the compose plugin, and put the deploy user in the
+   `docker` group.
+2. `sudo mkdir -p /opt/lumaindex/{releases,shared,backups}` and `chown` it to
+   that user.
+3. `sudo tailscale serve --bg --https=<free port> http://127.0.0.1:8080`.
+
+Then `env:push` and `deploy` as normal. Nothing else in the deploy path touches
+the host: Caddy binds `127.0.0.1:8080`, so no firewall rule is needed, and
+every container, volume and network is prefixed `lumaindex`.
+
+Pick the serve port to suit the host. 443 is the default because it is the
+tidiest URL; if something already holds it, any spare port works and the
+certificate is just as real — set `LUMA_PUBLIC_ORIGIN` and
+`DJANGO_CSRF_TRUSTED_ORIGINS` to include it, or logins fail CSRF with a message
+that does not mention ports.
+
 ## First deployment
 
 On your laptop, from a clone of this repo:
