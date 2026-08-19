@@ -203,6 +203,26 @@ whole process.
 PostgreSQL connection count. Keep the product under `max_connections`, which is
 100 by default.
 
+## When uploads are slow, look at the network before the app
+
+The first large upload on the deployed instance failed twice, and neither cause
+was in the application.
+
+The first was gunicorn's sync worker, above. The second was the path: Tailscale
+had not established a direct connection and was relaying everything through a
+DERP server, which is shared and rate-limited. `tailscale status` names it —
+`relay "sin"` rather than `direct` — and `tailscale netcheck` says why.
+
+On this host `MappingVariesByDestIP: true` on the client meant symmetric NAT,
+`PortMapping:` was empty on both ends, so nothing could open a port
+automatically, and the server's router was not forwarding UDP 41641. Allowing
+that port through the host's own firewall is necessary but not sufficient; the
+router in front of it has to forward too.
+
+A relayed path still works. It is simply slow enough — around 2 MB/s here —
+that a large upload becomes a multi-minute request, which is why uploads are
+chunked and resumable rather than relying on one connection surviving.
+
 ## Backups
 
 ```bash

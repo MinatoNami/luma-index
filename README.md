@@ -23,7 +23,7 @@ Caddy and a background worker — reachable over
 
 | | |
 | --- | --- |
-| **Upload** | Drag PDFs in from your computer — onto the page, or straight onto a folder. A ZIP has its folder structure rebuilt on import. Identical files are stored once. |
+| **Upload** | Drag PDFs in from your computer — onto the page, or straight onto a folder. Large files are sent in pieces and resume where they left off if the connection drops. A ZIP has its folder structure rebuilt on import. Identical files are stored once. |
 | **Organise** | Folders you create, rename, and delete. Drag items onto a folder to move them, or use the picker on any row. Tick several — shift-click for a run — and move, trash, favourite or collect them in one go. Each folder wears a mosaic of the covers inside it. Sort either by name, date added, last modified, size, or type. Deleting goes to a trash you can restore from — sortable too, including by when you deleted it. |
 | **Read** | A PDF.js reader: continuous scroll or single page, zoom, text selection, search within the book, an outline sidebar, page thumbnails. |
 | **Resume** | Your place is saved as you read and picked up on any other device. |
@@ -141,6 +141,18 @@ id where a click position was expected, so `activeHighlightRecord` looked for
 `.id` on a number, found nothing, and the popover's `v-if` silently never
 rendered. Clicking a highlight in the sidebar jumped to the page and then did
 nothing at all.
+
+**A large upload is sent in pieces**, in `library/chunked.py`. One multipart
+POST is all-or-nothing, and on a link that drops every few minutes a 600 MB
+file never lands — each attempt starts again from zero. The server's `received`
+counter, which is the size of the bytes actually on disk rather than anything a
+client claims, is the only thing that decides where the next chunk goes. A
+chunk arriving twice is behind that mark and refused; one arriving early would
+leave a hole and is refused too; both replies carry the real offset so a client
+corrects itself in one round trip instead of guessing. Completion hands the
+assembled file to the same `store_upload` a small file goes through, so the
+magic-byte check, size limit, quota accounting and deduplication have no second
+path to drift out of step with.
 
 **A password reset answers 204 even when the mail fails.** The endpoint
 already refused to say whether an address had an account; sending inside the
@@ -328,7 +340,7 @@ Python.
 | 6 — Sharing | Built |
 | 7 — Hardening | Built |
 
-425 backend tests, including a 64-case object-level permission matrix, and 44
+445 backend tests, including a 64-case object-level permission matrix, and 44
 frontend tests over the logic that has actually broken here — selection
 ranges, cover loading states, sort labels.
 

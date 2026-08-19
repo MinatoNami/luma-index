@@ -361,3 +361,15 @@ class BulkActionSerializer(serializers.Serializer):
                 {"folders": "That only applies to books."}
             )
         return attrs
+
+
+class ChunkedUploadStartSerializer(serializers.Serializer):
+    """What the client must say before sending any bytes.
+
+    The size is declared up front so the disk and quota checks can refuse the
+    file before it is uploaded rather than after.
+    """
+
+    filename = serializers.CharField(max_length=512)
+    size = serializers.IntegerField(min_value=1)
+    folder = serializers.IntegerField(required=False, allow_null=True)

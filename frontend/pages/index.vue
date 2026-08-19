@@ -20,6 +20,12 @@ const notice = ref('')
 const dragging = ref(false)
 const batches = ref<UploadBatch[]>([])
 
+// A large upload takes minutes. Without this it is a spinner, and a spinner
+// for four minutes is indistinguishable from a stuck one — which is how a
+// working upload gets abandoned halfway.
+const uploadProgress = ref<{ file: string; sent: number; total: number
+                             percent: number } | null>(null)
+
 // Remembered locally. PRD §24 wants view preferences on UserSettings so they
 // follow a reader between devices; that lands with the reader.
 const view = useState<ViewMode>('library-view', () => 'list')
@@ -378,7 +384,9 @@ async function submitFiles(files: File[], destination: number | null = currentId
   error.value = ''
   notice.value = ''
   try {
-    const result = await library.upload(files, destination)
+    const result = await library.upload(files, destination, (p) => {
+      uploadProgress.value = p
+    })
     const parts: string[] = []
     if (result.imported.length) parts.push(`${result.imported.length} added`)
     if (result.duplicates) parts.push(`${result.duplicates} already here`)
@@ -394,6 +402,7 @@ async function submitFiles(files: File[], destination: number | null = currentId
     error.value = err?.data?.detail || 'Upload failed.'
   } finally {
     busy.value = false
+    uploadProgress.value = null
   }
 }
 
@@ -613,6 +622,24 @@ function itemLabel(folder: Folder): string {
           </div>
         </li>
       </ul>
+
+      <div v-if="uploadProgress" class="upload-progress panel">
+        <div class="upload-head">
+          <strong>Uploading {{ uploadProgress.file }}</strong>
+          <span class="tertiary">
+            {{ formatBytes(uploadProgress.sent) }} of {{ formatBytes(uploadProgress.total) }}
+            · {{ uploadProgress.percent }}%
+          </span>
+        </div>
+        <div class="meter" role="progressbar" :aria-valuenow="uploadProgress.percent"
+             aria-valuemin="0" aria-valuemax="100"
+             :aria-label="`Uploading: ${uploadProgress.percent} per cent`">
+          <span class="fill" :style="{ width: `${Math.max(uploadProgress.percent, 2)}%` }" />
+        </div>
+        <p class="tertiary hint">
+          Large files are sent in pieces, so a dropped connection picks up where it left off.
+        </p>
+      </div>
 
       <SelectionBar v-if="selection.active.value"
                     :count="selection.count.value"
@@ -1006,4 +1033,18 @@ function itemLabel(folder: Folder): string {
 @media (prefers-reduced-motion: reduce) {
   .card-pick { transition: none; }
 }
+
+/* -- upload progress ----------------------------------------------------- */
+.upload-progress { display: grid; gap: var(--space-2); padding: var(--space-3);
+                   margin-bottom: var(--space-3); }
+.upload-head { display: flex; justify-content: space-between; align-items: baseline;
+               gap: var(--space-3); flex-wrap: wrap; }
+.upload-progress .meter { height: 8px; border-radius: var(--radius-full);
+                          background: var(--surface-sunken); overflow: hidden; }
+.upload-progress .fill { display: block; height: 100%; background: var(--accent);
+                         border-radius: var(--radius-full);
+                         transition: width var(--duration) var(--ease); }
+.upload-progress .hint { font-size: var(--text-xs); }
+
+@media (prefers-reduced-motion: reduce) { .upload-progress .fill { transition: none; } }
 </style>

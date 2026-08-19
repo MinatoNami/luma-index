@@ -22,6 +22,7 @@ from django.core.management.base import BaseCommand
 from django.db import connection as db_connection
 
 from common.db import advisory_lock
+from library.chunked import purge_stale
 from library.models import UploadBatch
 from library.retention import purge_expired, retention_days
 from library.services import process_pending_documents, process_zip_batch
@@ -107,7 +108,7 @@ class Command(BaseCommand):
 
     def pass_once(self) -> bool:
         worked = self.process_batches()
-        self.sweep_trash()
+        self.housekeeping()
         for _ in range(DOCUMENT_PASSES):
             if not self._running:
                 break
@@ -120,15 +121,13 @@ class Command(BaseCommand):
                 break
         return worked
 
-    def sweep_trash(self) -> None:
-        """Destroy trashed items past their retention, at most hourly.
+    def housekeeping(self) -> None:
+        """Hourly tidying: expired trash, and uploads nobody finished.
 
         Under an advisory lock like everything else here, so a second worker —
-        or somebody running `manage.py empty_trash` — cannot sweep the same
-        rows at the same time.
+        or somebody running `manage.py empty_trash` — cannot do it at the same
+        time.
         """
-        if not retention_days():
-            return
         now = time.monotonic()
         if self._last_sweep is not None and now - self._last_sweep < TRASH_SWEEP_SECONDS:
             return
@@ -137,7 +136,10 @@ class Command(BaseCommand):
         with advisory_lock("lumaindex.trash_sweep", blocking=False) as acquired:
             if not acquired:
                 return
-            purge_expired()
+            # Always: a half-sent upload holds disk whatever the trash policy is.
+            purge_stale()
+            if retention_days():
+                purge_expired()
 
     def process_batches(self) -> bool:
         worked = False

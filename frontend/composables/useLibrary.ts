@@ -52,6 +52,8 @@ export interface UploadBatch {
   error_summary: string
 }
 
+import type { ChunkProgress } from '~/composables/useChunkedUpload'
+
 export interface UploadResult {
   imported: Book[]
   duplicates: number
@@ -131,13 +133,51 @@ export function useLibrary() {
     }>('/library/trash/', { params: { ...options } })
   }
 
-  async function upload(files: File[], folder: number | null): Promise<UploadResult> {
+  /**
+   * Send files, chunking the large ones.
+   *
+   * Small files go as one multipart POST, which is simpler and cheap to retry.
+   * Anything big enough that losing it would hurt is sent in pieces instead,
+   * so a dropped connection costs one chunk rather than the whole upload.
+   */
+  async function upload(
+    files: File[],
+    folder: number | null,
+    onProgress?: (p: ChunkProgress) => void,
+  ): Promise<UploadResult> {
     await ensureCsrf()
-    const form = new FormData()
-    for (const file of files) form.append('files', file)
-    if (folder !== null) form.append('folder', String(folder))
-    // No Content-Type header: the browser must set the multipart boundary.
-    return await api<UploadResult>('/library/upload/', { method: 'POST', body: form })
+    const chunker = useChunkedUpload()
+
+    const small = files.filter(f => f.size <= CHUNKED_ABOVE_BYTES)
+    const large = files.filter(f => f.size > CHUNKED_ABOVE_BYTES)
+
+    const result: UploadResult = { imported: [], duplicates: 0, batches: [], errors: [] }
+
+    if (small.length) {
+      const form = new FormData()
+      for (const file of small) form.append('files', file)
+      if (folder !== null) form.append('folder', String(folder))
+      // No Content-Type header: the browser must set the multipart boundary.
+      const batch = await api<UploadResult>('/library/upload/', { method: 'POST', body: form })
+      result.imported.push(...batch.imported)
+      result.duplicates += batch.duplicates
+      result.batches.push(...batch.batches)
+      result.errors.push(...batch.errors)
+    }
+
+    // One at a time: several large files in parallel over a link that is
+    // already the bottleneck just makes each of them likelier to fail.
+    for (const file of large) {
+      try {
+        const done = await chunker.sendOne(file, folder, onProgress)
+        if (done.outcome === 'duplicate') result.duplicates += 1
+        else result.imported.push(done.book)
+      } catch (err: any) {
+        result.errors.push(`${file.name}: ${err?.data?.detail || 'upload failed'}`)
+      }
+    }
+
+    return result
   }
 
   async function batch(id: number) {

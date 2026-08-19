@@ -19,16 +19,17 @@ from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_protect
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import status
-from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.parsers import FileUploadParser, FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from . import bulk, sorting
+from . import bulk, chunked, sorting
 from .lifecycle import readers_of, set_visibility
 from .models import (
     Book,
     Bookmark,
+    ChunkedUpload,
     Collection,
     CollectionBook,
     Folder,
@@ -47,6 +48,7 @@ from .serializers import (
     BookmarkSerializer,
     BookSerializer,
     BulkActionSerializer,
+    ChunkedUploadStartSerializer,
     CollectionSerializer,
     FolderSerializer,
     HighlightSerializer,
@@ -498,6 +500,125 @@ class UploadView(OwnedMixin, APIView):
         logger.info("archive staged", extra={"event": "library.upload.staged",
                                              "batch_id": batch.pk})
         return batch
+
+
+@csrf_required
+class ChunkedUploadStartView(OwnedMixin, APIView):
+    """Begin a large upload.
+
+    Everything that could refuse the file — its size, the free disk, the
+    account's quota — is checked now. Refusing here costs nothing; refusing
+    after four minutes of uploading costs the whole thing.
+    """
+
+    @extend_schema(
+        summary="Start a chunked upload",
+        request=ChunkedUploadStartSerializer,
+        responses={201: OpenApiResponse(description="Where to send the first chunk"),
+                   507: OpenApiResponse(description="Out of disk space, or over quota")},
+    )
+    def post(self, request):
+        form = ChunkedUploadStartSerializer(data=request.data)
+        form.is_valid(raise_exception=True)
+        folder = self.get_folder(form.validated_data["folder"]) \
+            if form.validated_data.get("folder") else None
+
+        try:
+            upload = chunked.begin(request.user, filename=form.validated_data["filename"],
+                                   size=form.validated_data["size"], folder=folder)
+        except (InsufficientSpace, QuotaExceeded) as exc:
+            return Response({"detail": str(exc)},
+                            status=status.HTTP_507_INSUFFICIENT_STORAGE)
+        except IngestError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(_chunked_state(upload), status=status.HTTP_201_CREATED)
+
+
+@csrf_required
+class ChunkedUploadDetailView(OwnedMixin, APIView):
+    """Send the next chunk, ask where to resume from, or give up."""
+
+    parser_classes = [FileUploadParser]
+
+    def get_upload(self, request, upload_id: int) -> ChunkedUpload:
+        upload = ChunkedUpload.objects.filter(pk=upload_id, owner=request.user).first()
+        if upload is None:
+            raise Http404
+        return upload
+
+    @extend_schema(summary="How much of this upload has arrived",
+                   responses={200: OpenApiResponse(description="Resume point")})
+    def get(self, request, upload_id: int):
+        return Response(_chunked_state(self.get_upload(request, upload_id)))
+
+    @extend_schema(
+        summary="Append a chunk",
+        request={"application/octet-stream": {"type": "string", "format": "binary"}},
+        responses={200: OpenApiResponse(description="Accepted, with the new resume point"),
+                   409: OpenApiResponse(description="Sent from the wrong offset")},
+    )
+    def put(self, request, upload_id: int):
+        upload = self.get_upload(request, upload_id)
+        try:
+            offset = int(request.GET.get("offset", ""))
+        except ValueError:
+            return Response({"detail": "Say which byte this chunk starts at."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            received = chunked.append(upload, offset=offset, stream=request.stream)
+        except chunked.ChunkConflict as exc:
+            # 409 with the real resume point, so a client that lost a response
+            # or retried out of order can correct itself in one round trip.
+            return Response({"detail": str(exc), "received": exc.received},
+                            status=status.HTTP_409_CONFLICT)
+        except IngestError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_410_GONE)
+
+        return Response({"id": upload.pk, "received": received,
+                         "size": upload.declared_size})
+
+    @extend_schema(summary="Abandon an upload",
+                   responses={204: OpenApiResponse(description="Discarded")})
+    def delete(self, request, upload_id: int):
+        chunked.abandon(self.get_upload(request, upload_id))
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@csrf_required
+class ChunkedUploadCompleteView(OwnedMixin, APIView):
+    """Turn a finished upload into a book, through the ordinary path."""
+
+    @extend_schema(summary="Complete a chunked upload", request=None,
+                   responses={201: BookSerializer,
+                              409: OpenApiResponse(description="Still missing bytes")})
+    def post(self, request, upload_id: int):
+        upload = ChunkedUpload.objects.filter(pk=upload_id, owner=request.user).first()
+        if upload is None:
+            raise Http404
+
+        try:
+            book, outcome = chunked.finish(upload)
+        except chunked.ChunkConflict as exc:
+            return Response({"detail": str(exc), "received": exc.received},
+                            status=status.HTTP_409_CONFLICT)
+        except (InsufficientSpace, QuotaExceeded) as exc:
+            return Response({"detail": str(exc)},
+                            status=status.HTTP_507_INSUFFICIENT_STORAGE)
+        except IngestError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(
+            {"outcome": outcome,
+             "book": BookSerializer(book, context={"request": request}).data},
+            status=status.HTTP_201_CREATED,
+        )
+
+
+def _chunked_state(upload: ChunkedUpload) -> dict:
+    return {"id": upload.pk, "received": upload.received,
+            "size": upload.declared_size, "chunk_size": chunked.CHUNK_SIZE}
 
 
 class UploadBatchListView(OwnedMixin, APIView):

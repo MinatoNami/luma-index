@@ -45,6 +45,13 @@ urlpatterns = [
     path("continue-reading/", views.ContinueReadingView.as_view(), name="continue-reading"),
 
     path("upload/", views.UploadView.as_view(), name="upload"),
+    path("uploads/chunked/", views.ChunkedUploadStartView.as_view(),
+         name="chunked-upload-start"),
+    path("uploads/chunked/<int:upload_id>/", views.ChunkedUploadDetailView.as_view(),
+         name="chunked-upload-detail"),
+    path("uploads/chunked/<int:upload_id>/complete/", views.ChunkedUploadCompleteView.as_view(),
+         name="chunked-upload-complete"),
+
     path("uploads/", views.UploadBatchListView.as_view(), name="upload-batches"),
     path("uploads/<int:batch_id>/", views.UploadBatchDetailView.as_view(),
          name="upload-batch-detail"),

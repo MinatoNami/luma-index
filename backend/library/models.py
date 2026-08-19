@@ -575,6 +575,48 @@ class PageNote(models.Model):
         return self.body[:60]
 
 
+class ChunkedUpload(models.Model):
+    """A large file arriving a piece at a time.
+
+    A single multipart POST is all-or-nothing: a 600 MB upload over a link that
+    drops once in four minutes never lands, and the reader has no way to tell a
+    slow upload from a stuck one. This row is the receipt for a file being sent
+    in pieces, so a dropped connection costs the chunk in flight rather than
+    everything sent so far.
+
+    `received` is the only source of truth for where to resume. It is the
+    number of bytes actually on disk, not what any client claimed to have sent,
+    which is what makes a retry safe: a chunk that arrives twice is recognised
+    by its offset and ignored rather than appended again.
+    """
+
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="chunked_uploads"
+    )
+    original_filename = models.CharField(max_length=512)
+    declared_size = models.BigIntegerField()
+    received = models.BigIntegerField(default=0)
+    staged_path = models.CharField(max_length=1024, blank=True)
+    target_folder = models.ForeignKey(
+        Folder, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="chunked_uploads",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["owner", "-created_at"])]
+
+    def __str__(self) -> str:
+        return f"{self.original_filename} ({self.received}/{self.declared_size})"
+
+    @property
+    def is_complete(self) -> bool:
+        return self.received >= self.declared_size
+
+
 class UploadBatch(models.Model):
     """One upload the worker has to chew through.
 
