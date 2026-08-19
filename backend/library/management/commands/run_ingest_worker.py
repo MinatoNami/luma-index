@@ -59,9 +59,13 @@ class Command(BaseCommand):
         signal.signal(signal.SIGINT, stop)
 
         self.beat()
-        # Zero, not "now", so a worker that has just started sweeps immediately:
-        # after a restart, the thing most likely to be overdue is the trash.
-        self._last_sweep = 0.0
+        # None, not zero, for "has not swept yet". Zero only reads as "long ago"
+        # if the clock's origin is long ago, and time.monotonic() counts from
+        # boot on Linux — so on a machine up for less than TRASH_SWEEP_SECONDS
+        # the subtraction stayed under the interval and the sweep never ran at
+        # all. A freshly rebooted server would skip the trash for its first
+        # hour, which is exactly the case this was written to handle.
+        self._last_sweep: float | None = None
         logger.info("ingest worker started", extra={"event": "ingest.worker.started"})
 
         while self._running:
@@ -125,9 +129,10 @@ class Command(BaseCommand):
         """
         if not retention_days():
             return
-        if time.monotonic() - self._last_sweep < TRASH_SWEEP_SECONDS:
+        now = time.monotonic()
+        if self._last_sweep is not None and now - self._last_sweep < TRASH_SWEEP_SECONDS:
             return
-        self._last_sweep = time.monotonic()
+        self._last_sweep = now
 
         with advisory_lock("lumaindex.trash_sweep", blocking=False) as acquired:
             if not acquired:

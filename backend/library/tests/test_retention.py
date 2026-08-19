@@ -246,6 +246,22 @@ def test_the_worker_sweeps_on_its_first_pass(user, settings):
 
 
 @pytest.mark.django_db(transaction=True)
+def test_the_worker_sweeps_on_a_machine_that_just_booted(user, settings, monkeypatch):
+    """time.monotonic() counts from boot on Linux, so on a host up for less
+    than the sweep interval the elapsed-time check used to compare against zero
+    and conclude it had just swept. CI runners are always in that state; the
+    real cost is a rebooted server ignoring its trash for an hour."""
+    settings.TRASH_RETENTION_DAYS = 30
+    trashed_book(user, "Old", days=40)
+    monkeypatch.setattr("library.management.commands.run_ingest_worker.time.monotonic",
+                        lambda: 5.0)
+
+    call_command("run_ingest_worker", "--once")
+
+    assert Book.objects.count() == 0
+
+
+@pytest.mark.django_db(transaction=True)
 def test_the_worker_leaves_the_trash_alone_when_retention_is_off(user, settings):
     settings.TRASH_RETENTION_DAYS = 0
     trashed_book(user, "Old", days=4000)
