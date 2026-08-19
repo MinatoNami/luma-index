@@ -32,6 +32,16 @@ urlpatterns = [
     path("books/<int:book_id>/share", views.BookShareView.as_view(), name="book-share"),
     path("shared/", views.SharedBooksView.as_view(), name="shared"),
 
+    path("collections/", views.CollectionListView.as_view(), name="collections"),
+    path("collections/<int:collection_id>/", views.CollectionDetailView.as_view(),
+         name="collection-detail"),
+    path("collections/<int:collection_id>/books/", views.CollectionBooksView.as_view(),
+         name="collection-books"),
+    path("collections/<int:collection_id>/books/<int:book_id>/",
+         views.CollectionBookDetailView.as_view(), name="collection-book-detail"),
+    path("books/<int:book_id>/favourite", views.BookFavouriteView.as_view(),
+         name="book-favourite"),
+
     path("continue-reading/", views.ContinueReadingView.as_view(), name="continue-reading"),
 
     path("upload/", views.UploadView.as_view(), name="upload"),

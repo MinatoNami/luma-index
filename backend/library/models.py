@@ -267,6 +267,147 @@ class BookSource(models.Model):
         return self.availability_status == self.Availability.AVAILABLE
 
 
+class Collection(models.Model):
+    """A user-defined grouping, independent of where a book sits in folders.
+
+    Folders are where a file lives — one place, like a filing cabinet.
+    Collections are how a reader thinks about a book, and the same book can be
+    in several at once (PRD §11, §12) without the file being duplicated.
+    """
+
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="collections"
+    )
+    name = models.CharField(max_length=255)
+    parent = models.ForeignKey(
+        "self", on_delete=models.CASCADE, null=True, blank=True, related_name="children"
+    )
+    books = models.ManyToManyField(
+        "Book", through="CollectionBook", related_name="collections"
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+        constraints = [
+            # Two constraints for the same reason Folder needs two: PostgreSQL
+            # treats NULL parents as distinct, so one UNIQUE would allow two
+            # top-level collections with the same name.
+            models.UniqueConstraint(
+                fields=["owner", "parent", "name"],
+                condition=Q(parent__isnull=False),
+                name="unique_collection_name_in_parent",
+            ),
+            models.UniqueConstraint(
+                fields=["owner", "name"],
+                condition=Q(parent__isnull=True),
+                name="unique_collection_name_at_root",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.name
+
+    def ancestors(self) -> list[Collection]:
+        chain: list[Collection] = []
+        seen: set[int] = set()
+        node = self.parent
+        while node is not None and node.pk not in seen:
+            seen.add(node.pk)
+            chain.append(node)
+            node = node.parent
+        return list(reversed(chain))
+
+    @property
+    def path(self) -> str:
+        return "/".join([*(c.name for c in self.ancestors()), self.name])
+
+    def descendant_ids(self) -> list[int]:
+        found: list[int] = []
+        frontier = [self.pk]
+        while frontier:
+            children = [
+                pk for pk in Collection.objects.filter(parent_id__in=frontier)
+                .values_list("pk", flat=True)
+                if pk not in found and pk != self.pk
+            ]
+            if not children:
+                break
+            found.extend(children)
+            frontier = children
+        return found
+
+    def clean(self):
+        if self.parent_id is None:
+            return
+        if self.pk and self.parent_id == self.pk:
+            raise ValidationError({"parent": "A collection cannot be inside itself."})
+        if self.pk and self.parent_id in set(self.descendant_ids()):
+            raise ValidationError(
+                {"parent": "A collection cannot be moved inside its own subcollection."}
+            )
+        if self.parent.owner_id != self.owner_id:
+            raise ValidationError({"parent": "That collection belongs to another user."})
+        if self.parent.depth + 1 >= MAX_FOLDER_DEPTH:
+            raise ValidationError(
+                {"parent": f"Collections may nest at most {MAX_FOLDER_DEPTH} deep."}
+            )
+
+    @property
+    def depth(self) -> int:
+        return len(self.ancestors())
+
+
+class CollectionBook(models.Model):
+    """Membership. Deleting one removes the book from the collection, never the
+    book itself — the row is the membership, not the thing."""
+
+    collection = models.ForeignKey(Collection, on_delete=models.CASCADE,
+                                   related_name="memberships")
+    book = models.ForeignKey("Book", on_delete=models.CASCADE, related_name="memberships")
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-added_at"]
+        constraints = [
+            models.UniqueConstraint(fields=["collection", "book"],
+                                    name="unique_book_per_collection")
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.book} in {self.collection}"
+
+
+class UserBookState(models.Model):
+    """Per-reader flags on any book they can read.
+
+    Separate from ReadingProgress on purpose: favouriting a book you have never
+    opened should not create a progress record, which would then surface it in
+    Continue Reading as though you had started it.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="book_states"
+    )
+    book = models.ForeignKey("Book", on_delete=models.CASCADE, related_name="reader_states")
+
+    is_favourite = models.BooleanField(default=False)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["user", "book"], name="unique_state_per_reader")
+        ]
+        indexes = [models.Index(fields=["user", "is_favourite"])]
+
+    def __str__(self) -> str:
+        return f"{self.user} · {self.book}"
+
+
 class ShareAudit(models.Model):
     """Who changed a book's visibility, and when.
 

@@ -28,11 +28,14 @@ from .lifecycle import readers_of, set_visibility
 from .models import (
     Book,
     Bookmark,
+    Collection,
+    CollectionBook,
     Folder,
     Highlight,
     PageNote,
     ReadingProgress,
     UploadBatch,
+    UserBookState,
 )
 from .outline import outline_for
 from .permissions import can_modify, can_read, readable_books
@@ -40,6 +43,7 @@ from .ranges import serve_file
 from .serializers import (
     BookmarkSerializer,
     BookSerializer,
+    CollectionSerializer,
     FolderSerializer,
     HighlightSerializer,
     PageNoteSerializer,
@@ -71,11 +75,18 @@ class OwnedMixin:
         return (
             Book.objects.filter(owner=self.request.user)
             .select_related("source", "folder")
-            .prefetch_related(Prefetch(
-                "progress_records",
-                queryset=ReadingProgress.objects.filter(user=self.request.user),
-                to_attr="_reader_progress",
-            ))
+            .prefetch_related(
+                Prefetch(
+                    "progress_records",
+                    queryset=ReadingProgress.objects.filter(user=self.request.user),
+                    to_attr="_reader_progress",
+                ),
+                Prefetch(
+                    "reader_states",
+                    queryset=UserBookState.objects.filter(user=self.request.user),
+                    to_attr="_reader_state",
+                ),
+            )
         )
 
     def get_folder(self, folder_id: int, *, live_only: bool = True) -> Folder:
@@ -237,6 +248,24 @@ class BookListView(OwnedMixin, APIView):
     @extend_schema(summary="Books", responses={200: BookSerializer(many=True)})
     def get(self, request):
         queryset = self.books().live()
+
+        # The virtual views from PRD §12, as a filter rather than magic
+        # collection ids — otherwise every collection endpoint grows special
+        # cases for values that are not collections.
+        view = request.GET.get("view")
+        if view == "favourites":
+            queryset = queryset.filter(reader_states__user=request.user,
+                                       reader_states__is_favourite=True)
+        elif view == "recent":
+            queryset = queryset.order_by("-created_at")[:50]
+            return Response(BookSerializer(queryset, many=True,
+                                           context={"request": request}).data)
+        elif view == "unsorted":
+            # In no collection at all — the pile you have not filed yet.
+            queryset = queryset.filter(memberships__isnull=True)
+        elif "collection" in request.GET:
+            queryset = queryset.filter(memberships__collection_id=request.GET["collection"],
+                                       memberships__collection__owner=request.user)
 
         if "folder" in request.GET:
             raw = request.GET["folder"]
@@ -766,3 +795,133 @@ class BookShareView(OwnedMixin, APIView):
         set_visibility(book, request.user, visibility)
         return Response({"visibility": book.visibility,
                          "other_readers": readers_of(book).count()})
+
+
+@csrf_required
+class CollectionListView(OwnedMixin, APIView):
+    """Collections are per-user; there is no id in the URL but the caller's."""
+
+    def collections(self):
+        return Collection.objects.filter(owner=self.request.user)
+
+    @extend_schema(summary="Collections", responses={200: CollectionSerializer(many=True)})
+    def get(self, request):
+        queryset = self.collections()
+        if "parent" in request.GET:
+            raw = request.GET["parent"]
+            queryset = (queryset.filter(parent__isnull=True) if raw in ("", "root", "null")
+                        else queryset.filter(parent_id=raw))
+        return Response(CollectionSerializer(queryset, many=True,
+                                             context={"request": request}).data)
+
+    @extend_schema(summary="Create a collection", request=CollectionSerializer,
+                   responses={201: CollectionSerializer})
+    def post(self, request):
+        serializer = CollectionSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        collection = Collection(owner=request.user, **serializer.validated_data)
+        return self._save(collection, request, status.HTTP_201_CREATED)
+
+    def _save(self, collection, request, ok_status):
+        try:
+            collection.full_clean(exclude=["owner"])
+            collection.save()
+        except DjangoValidationError as exc:
+            return Response({"detail": "; ".join(sum(exc.message_dict.values(), []))},
+                            status=status.HTTP_400_BAD_REQUEST)
+        except IntegrityError:
+            return Response({"detail": "A collection with that name already exists here."},
+                            status=status.HTTP_409_CONFLICT)
+        return Response(CollectionSerializer(collection, context={"request": request}).data,
+                        status=ok_status)
+
+
+@csrf_required
+class CollectionDetailView(OwnedMixin, APIView):
+    def get_collection(self, request, collection_id: int) -> Collection:
+        collection = Collection.objects.filter(pk=collection_id, owner=request.user).first()
+        if collection is None:
+            raise Http404
+        return collection
+
+    @extend_schema(summary="One collection", responses={200: CollectionSerializer})
+    def get(self, request, collection_id: int):
+        collection = self.get_collection(request, collection_id)
+        data = CollectionSerializer(collection, context={"request": request}).data
+        data["ancestors"] = CollectionSerializer(collection.ancestors(), many=True,
+                                                 context={"request": request}).data
+        return Response(data)
+
+    @extend_schema(summary="Rename or move a collection", request=CollectionSerializer,
+                   responses={200: CollectionSerializer})
+    def patch(self, request, collection_id: int):
+        collection = self.get_collection(request, collection_id)
+        serializer = CollectionSerializer(collection, data=request.data, partial=True,
+                                          context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        for field, value in serializer.validated_data.items():
+            setattr(collection, field, value)
+        return CollectionListView._save(self, collection, request, status.HTTP_200_OK)
+
+    @extend_schema(summary="Delete a collection",
+                   responses={204: OpenApiResponse(description="Deleted")})
+    def delete(self, request, collection_id: int):
+        collection = self.get_collection(request, collection_id)
+        # Removes the grouping, never the books in it. A collection is a view
+        # onto a library, not a container that owns anything.
+        collection.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@csrf_required
+class CollectionBooksView(OwnedMixin, APIView):
+    @extend_schema(summary="Books in a collection", responses={200: BookSerializer(many=True)})
+    def get(self, request, collection_id: int):
+        collection = CollectionDetailView.get_collection(self, request, collection_id)
+        books = self.books().live().filter(memberships__collection=collection)
+        return Response(BookSerializer(books, many=True, context={"request": request}).data)
+
+    @extend_schema(summary="Add a book to a collection", request=dict,
+                   responses={201: OpenApiResponse(description="Added")})
+    def post(self, request, collection_id: int):
+        collection = CollectionDetailView.get_collection(self, request, collection_id)
+        book = self.get_readable_book(int(request.data.get("book_id", 0)))
+        _, created = CollectionBook.objects.get_or_create(collection=collection, book=book)
+        return Response({"added": created},
+                        status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+
+@csrf_required
+class CollectionBookDetailView(OwnedMixin, APIView):
+    @extend_schema(summary="Remove a book from a collection",
+                   responses={204: OpenApiResponse(description="Removed")})
+    def delete(self, request, collection_id: int, book_id: int):
+        collection = CollectionDetailView.get_collection(self, request, collection_id)
+        CollectionBook.objects.filter(collection=collection, book_id=book_id).delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@csrf_required
+class BookFavouriteView(OwnedMixin, APIView):
+    """Favourite is a flag, not a magic collection.
+
+    A system-created collection would be renameable and deletable by the user,
+    and a star icon pointing at a collection called something else is a bug
+    report waiting to happen (see docs/phases/03-library.md).
+    """
+
+    @extend_schema(summary="Favourite a book", request=None,
+                   responses={200: OpenApiResponse(description="Favourited")})
+    def post(self, request, book_id: int):
+        book = self.get_readable_book(book_id)
+        state, _ = UserBookState.objects.get_or_create(user=request.user, book=book)
+        state.is_favourite = True
+        state.save(update_fields=["is_favourite", "updated_at"])
+        return Response({"is_favourite": True})
+
+    @extend_schema(summary="Unfavourite a book",
+                   responses={204: OpenApiResponse(description="Removed")})
+    def delete(self, request, book_id: int):
+        book = self.get_readable_book(book_id)
+        UserBookState.objects.filter(user=request.user, book=book).update(is_favourite=False)
+        return Response(status=status.HTTP_204_NO_CONTENT)

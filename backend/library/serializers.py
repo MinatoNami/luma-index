@@ -8,6 +8,7 @@ from .models import (
     Book,
     Bookmark,
     BookSource,
+    Collection,
     Folder,
     Highlight,
     PageNote,
@@ -142,14 +143,22 @@ class BookSerializer(serializers.ModelSerializer):
     source = BookSourceSerializer(read_only=True)
     path = serializers.CharField(read_only=True)
     progress = serializers.SerializerMethodField()
+    is_favourite = serializers.SerializerMethodField()
 
     class Meta:
         model = Book
         fields = ("id", "title", "folder", "path", "page_count", "has_text_layer",
-                  "visibility", "thumbnail_path", "source", "progress", "deleted_at",
-                  "created_at", "updated_at")
+                  "visibility", "thumbnail_path", "source", "progress", "is_favourite",
+                  "deleted_at", "created_at", "updated_at")
         read_only_fields = ("id", "path", "page_count", "has_text_layer", "thumbnail_path",
-                            "source", "progress", "deleted_at", "created_at", "updated_at")
+                            "source", "progress", "is_favourite", "deleted_at",
+                            "created_at", "updated_at")
+
+    @extend_schema_field(serializers.BooleanField())
+    def get_is_favourite(self, obj) -> bool:
+        """Attached by the list view's prefetch, so this costs no extra query."""
+        states = getattr(obj, "_reader_state", None)
+        return bool(states and states[0].is_favourite)
 
     @extend_schema_field(ProgressSummarySerializer(allow_null=True))
     def get_progress(self, obj):
@@ -233,3 +242,39 @@ class UploadRequestSerializer(serializers.Serializer):
         help_text="One or more PDFs, or a ZIP archive of them.",
     )
     folder = serializers.IntegerField(required=False, help_text="Target folder; root if omitted.")
+
+
+class CollectionSerializer(serializers.ModelSerializer):
+    path = serializers.CharField(read_only=True)
+    book_count = serializers.SerializerMethodField()
+    has_children = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Collection
+        fields = ("id", "name", "parent", "path", "book_count", "has_children",
+                  "created_at", "updated_at")
+        read_only_fields = ("id", "path", "book_count", "has_children",
+                            "created_at", "updated_at")
+
+    @extend_schema_field(serializers.IntegerField())
+    def get_book_count(self, obj) -> int:
+        return obj.memberships.filter(book__deleted_at__isnull=True).count()
+
+    @extend_schema_field(serializers.BooleanField())
+    def get_has_children(self, obj) -> bool:
+        return obj.children.exists()
+
+    def validate_name(self, value: str) -> str:
+        name = value.strip()
+        if not name:
+            raise serializers.ValidationError("A collection needs a name.")
+        return name[:255]
+
+    def validate_parent(self, value):
+        if value is None:
+            return value
+        if value.owner_id != self.context["request"].user.pk:
+            # "No such collection" rather than "forbidden": confirming it exists
+            # would leak another user's structure.
+            raise serializers.ValidationError("No such collection.")
+        return value
