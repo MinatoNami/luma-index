@@ -167,8 +167,15 @@ class PasswordChangeView(APIView):
 class PasswordResetRequestView(APIView):
     """Start a password reset.
 
-    Always answers 204, whether or not the address has an account. Anything
-    else turns this endpoint into a way to enumerate the instance's users.
+    Always answers 204, whether or not the address has an account, and whether
+    or not the mail actually went out. Anything else turns this endpoint into a
+    way to enumerate the instance's users — a 500 from a refused SMTP handshake
+    says "this address exists" exactly as loudly as a 404 would, and it says it
+    only for the addresses that do.
+
+    The cost is that a misconfigured relay is invisible from the outside, so it
+    is logged at ERROR and `manage.py check_email` exists to check the
+    configuration directly rather than by locking yourself out.
     """
 
     permission_classes = [AllowAny]
@@ -189,24 +196,34 @@ class PasswordResetRequestView(APIView):
             uid, token = build_reset_token(user)
             reset_url = f"{settings.PUBLIC_ORIGIN.rstrip('/')}/reset/{uid}/{token}"
             hours = settings.PASSWORD_RESET_TIMEOUT // 3600
-            send_mail(
-                subject="Reset your LumaIndex password",
-                message=(
-                    "Someone asked to reset the LumaIndex password for this "
-                    "address.\n\n"
-                    f"{reset_url}\n\n"
-                    f"The link is valid for {hours} hour(s) and stops working "
-                    "once it is used.\n\n"
-                    "If this was not you, no action is needed — your password "
-                    "has not changed."
-                ),
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[user.email],
-                fail_silently=False,
-            )
-            # The URL carries the token, so it must never reach the log.
-            logger.info("password reset requested",
-                        extra={"event": "auth.reset.requested", "user_id": user.pk})
+            try:
+                send_mail(
+                    subject="Reset your LumaIndex password",
+                    message=(
+                        "Someone asked to reset the LumaIndex password for this "
+                        "address.\n\n"
+                        f"{reset_url}\n\n"
+                        f"The link is valid for {hours} hour(s) and stops working "
+                        "once it is used.\n\n"
+                        "If this was not you, no action is needed — your password "
+                        "has not changed."
+                    ),
+                    from_email=settings.DEFAULT_FROM_EMAIL,
+                    recipient_list=[user.email],
+                    fail_silently=False,
+                )
+            except Exception as exc:
+                # Swallowed on purpose: see the class docstring. The type is
+                # logged, never the message — SMTP errors quote the recipient
+                # back, and the whole point is not to say who exists.
+                logger.error("password reset email failed to send",
+                             extra={"event": "auth.reset.send_failed",
+                                    "user_id": user.pk,
+                                    "reason": type(exc).__name__})
+            else:
+                # The URL carries the token, so it must never reach the log.
+                logger.info("password reset requested",
+                            extra={"event": "auth.reset.requested", "user_id": user.pk})
         else:
             logger.info("password reset requested for unknown address",
                         extra={"event": "auth.reset.unknown"})

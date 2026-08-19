@@ -134,6 +134,17 @@ Three shapes carry the design:
 Deleting is a **trash**. An uploaded PDF may be the only copy its owner has, so
 deletion is reversible and destroying it is a separate, explicit step.
 
+**A password reset answers 204 even when the mail fails.** The endpoint
+already refused to say whether an address had an account; sending inside the
+request quietly undid that, because a 500 from a refused SMTP handshake says
+"this address exists" exactly as loudly as a 404 would, and says it only for
+the addresses that do. Send failures are swallowed, logged at ERROR with the
+exception type but never the address, and `manage.py check_email` exists so a
+misconfigured relay can be found without locking anyone out to find it. TLS or
+SSL follows the port unless you say otherwise, and `EMAIL_TIMEOUT` is set
+because password reset sends inside a request and smtplib's default wait is
+measured in minutes.
+
 **Backups land on the machine that runs the deploy script**, never only on the
 server — a backup on the host it backs up survives everything except the
 failure you are afraid of. The two halves are treated differently because they
@@ -246,6 +257,13 @@ browsers have been exercised in anger. PRD §39 treats tablet as a primary
 reading target; in practice it is not one for this instance, so tablet-specific
 testing is not tracked as outstanding work.
 
+No real relay has been used from here. Delivery was exercised end to end
+against a local SMTP sink — the message arrived with the right sender,
+recipient and subject — and the failure paths were driven directly: a refused
+connection, and a relay that will not accept credentials. What has not been
+tried is a provider that wants an app password or rejects the From domain,
+which is exactly what `check_email` is for.
+
 No server is configured in this checkout, so `deploy.sh backup` has never been
 run end to end. What has been exercised against the local stack is the part
 that could silently produce a broken backup: the selective `tar` fetch through
@@ -271,7 +289,6 @@ has to be checked in a real browser.**
 
 | What | Consequence |
 | --- | --- |
-| **Real email delivery** | Password reset works, but the console backend prints reset links into the log. Point `LUMA_EMAIL_BACKEND` at an SMTP relay before a second person has an account. |
 | **Sharing with named people or groups** | §16 keeps this to private or shared-with-everyone-signed-in. The richer model is §43 future work and would change `library/permissions.py` alone. |
 
 ### Open question
@@ -294,7 +311,7 @@ tuning question now rather than a design one.
 | 6 — Sharing | Built |
 | 7 — Hardening | Built |
 
-412 backend tests, including a 64-case object-level permission matrix.
+425 backend tests, including a 64-case object-level permission matrix.
 
 ---
 

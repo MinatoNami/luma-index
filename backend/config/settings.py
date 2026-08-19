@@ -275,17 +275,43 @@ SPECTACULAR_SETTINGS = {
 # Email (password reset)
 # --------------------------------------------------------------------------- #
 
-if env("LUMA_EMAIL_BACKEND", "console") == "smtp":
+EMAIL_MODE = env("LUMA_EMAIL_BACKEND", "console").strip().lower()
+
+if EMAIL_MODE == "smtp":
     EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
     EMAIL_HOST = env("EMAIL_HOST", required=True)
     EMAIL_PORT = env_int("EMAIL_PORT", 587)
     EMAIL_HOST_USER = env("EMAIL_HOST_USER")
     EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD")
-    EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", True)
-else:
+    # STARTTLS on 587 is the common case; 465 is implicit TLS and needs the
+    # other switch. Django refuses both at once, so the default for SSL follows
+    # the port rather than being set independently and contradicting TLS.
+    EMAIL_USE_SSL = env_bool("EMAIL_USE_SSL", EMAIL_PORT == 465)
+    EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", not EMAIL_USE_SSL)
+    if EMAIL_USE_SSL and EMAIL_USE_TLS:
+        raise RuntimeError(
+            "EMAIL_USE_TLS and EMAIL_USE_SSL cannot both be on. Use TLS with "
+            "port 587 (STARTTLS) or SSL with port 465 (implicit TLS)."
+        )
+    # Without this, smtplib waits on the system default — which can be minutes.
+    # Password reset sends inside the request, so an unreachable relay would
+    # hold a gunicorn worker open for every attempt until they were all gone.
+    EMAIL_TIMEOUT = env_int("EMAIL_TIMEOUT", 10)
+elif EMAIL_MODE in ("console", ""):
     EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+elif EMAIL_MODE == "dummy":
+    # Discards everything. For a staging copy of production data, where sending
+    # real mail to real addresses is the failure you are guarding against.
+    EMAIL_BACKEND = "django.core.mail.backends.dummy.EmailBackend"
+else:
+    raise RuntimeError(
+        f"LUMA_EMAIL_BACKEND must be 'smtp', 'console' or 'dummy', not {EMAIL_MODE!r}."
+    )
 
 DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", "lumaindex@localhost")
+# Django's own error mail. Same address, so a relay that only accepts one
+# sender does not reject half of what this instance sends.
+SERVER_EMAIL = env("SERVER_EMAIL", DEFAULT_FROM_EMAIL)
 
 
 # --------------------------------------------------------------------------- #

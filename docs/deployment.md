@@ -111,6 +111,54 @@ backup before a risky migration:
 ./deploy/deploy.sh backup --download
 ```
 
+## Email
+
+Password reset is the only mail this instance sends, and until it can send,
+reset links only ever reach the backend log. That is fine for one person who
+can read the log and nobody else; it stops being fine the moment a second
+person has an account.
+
+Set the relay in `.env`:
+
+```bash
+LUMA_EMAIL_BACKEND=smtp
+EMAIL_HOST=smtp.example.com
+EMAIL_PORT=587
+EMAIL_HOST_USER=...
+EMAIL_HOST_PASSWORD=...
+DEFAULT_FROM_EMAIL=lumaindex@your-domain
+```
+
+Leave `EMAIL_USE_TLS` and `EMAIL_USE_SSL` blank and the port decides: 587 uses
+STARTTLS, 465 uses implicit TLS. Setting both is refused at startup rather than
+quietly resolved, because the two are contradictory and picking one for you
+would hide the mistake until somebody needed a password reset.
+
+Then check it, which is a separate step on purpose:
+
+```bash
+./deploy/deploy.sh manage check_email you@example.com
+```
+
+It prints the configuration it is about to use — never the password — and turns
+the usual first-time failures into a sentence saying what to change: the wrong
+TLS mode for the port, a From address the relay will not accept, an account
+password where the provider wanted an app password, credentials offered to a
+relay that does not want them.
+
+**Why you cannot test this by using the app.** Password reset answers 204
+whether or not the address has an account, and whether or not the mail went
+out. That is deliberate: any other answer turns the endpoint into a way to
+enumerate users, and a 500 from a refused SMTP handshake would appear only for
+addresses that exist. The cost is that a broken relay is invisible from
+outside, so it is logged at ERROR — `event: auth.reset.send_failed` — and
+`check_email` is how you look.
+
+`EMAIL_TIMEOUT` defaults to 10 seconds. Sending happens inside the request, and
+smtplib's own default wait is measured in minutes, so an unreachable relay
+would otherwise hold a gunicorn worker open on every attempt until there were
+none left.
+
 ## Backups
 
 ```bash
