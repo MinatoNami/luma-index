@@ -36,6 +36,12 @@ dist/
 data/
 backups/
 
+# Build artefacts the container writes back through a bind mount: collectstatic
+# output, and pip's user site when dev requirements are installed into a
+# running container. Both are regenerated, and both are tens of megabytes.
+backend/staticfiles/
+backend/.local/
+
 # OS / editor
 .DS_Store
 Thumbs.db

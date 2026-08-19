@@ -24,10 +24,11 @@ Caddy and a background worker — reachable over
 | | |
 | --- | --- |
 | **Upload** | Drag PDFs in from your computer — onto the page, or straight onto a folder. A ZIP has its folder structure rebuilt on import. Identical files are stored once. |
-| **Organise** | Folders you create, rename, and delete. Drag items onto a folder to move them, or use the picker on any row. Deleting goes to a trash you can restore from. |
+| **Organise** | Folders you create, rename, and delete. Drag items onto a folder to move them, or use the picker on any row. Each folder wears a mosaic of the covers inside it. Deleting goes to a trash you can restore from. |
 | **Read** | A PDF.js reader: continuous scroll or single page, zoom, text selection, search within the book, an outline sidebar, page thumbnails. |
 | **Resume** | Your place is saved as you read and picked up on any other device. |
 | **Annotate** | Bookmarks, highlighted passages in four colours, notes on a highlight, and page notes for scans with no text layer. |
+| **Collect** | Star a book as a favourite, or gather books into collections that cut across folders. |
 | **Share** | Mark a book shared and anyone signed in can read it — while keeping their own place and their own notes. |
 
 ## What it deliberately does not do
@@ -133,6 +134,17 @@ Three shapes carry the design:
 Deleting is a **trash**. An uploaded PDF may be the only copy its owner has, so
 deletion is reversible and destroying it is a separate, explicit step.
 
+**Folders have no picture of their own**, so they borrow one. The API sends up
+to four book ids per folder and the browser tiles the same per-book covers it
+already shows in the grid — there is no composited folder image anywhere, and so
+nothing to invalidate when a folder's contents change. A stored composite would
+have to be regenerated on every add, move, trash, restore, delete and cover
+render, up the ancestor chain, and would still show the wrong picture until the
+worker caught up. Lookahead stops one level down: a folder holding only
+subfolders — what every ZIP import produces at its root — takes one cover from
+each child in turn, so it summarises what is beneath it instead of impersonating
+its own first child. See `library/previews.py`.
+
 ---
 
 ## Quick start
@@ -198,7 +210,6 @@ has to be checked in a real browser.**
 | **Real email delivery** | Password reset works, but the console backend prints reset links into the log. Point `LUMA_EMAIL_BACKEND` at an SMTP relay before a second person has an account. |
 | **Off-box backups** | `deploy.sh backup` writes to the host it is backing up. The restore procedure itself has been rehearsed — see [the drill](docs/deployment.md#the-restore-drill) — but copying dumps and the `library` volume elsewhere is still manual. |
 | **Emptying the trash automatically** | Trashed items stay until deleted by hand. |
-| **Collections and favourites** | Phase 3's remaining half. Search, sort, and the three library views exist; the many-to-many layer does not. |
 | **Sharing with named people or groups** | §16 keeps this to private or shared-with-everyone-signed-in. The richer model is §43 future work and would change `library/permissions.py` alone. |
 
 ### Open question
@@ -215,13 +226,13 @@ tuning question now rather than a design one.
 | --- | --- |
 | 1 — Platform, auth, deployment | Built |
 | 2 — Uploads, folders, storage | Built |
-| 3 — Library | Views, search and sort built; collections and favourites not |
+| 3 — Library | Built |
 | 4 — PDF reader | Built |
 | 5 — Bookmarks, highlights, notes | Built |
 | 6 — Sharing | Built |
 | 7 — Hardening | Built |
 
-307 backend tests, including a 64-case object-level permission matrix.
+338 backend tests, including a 64-case object-level permission matrix.
 
 ---
 

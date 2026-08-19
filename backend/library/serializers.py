@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from django.db.models import Manager
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
@@ -15,6 +16,21 @@ from .models import (
     ReadingProgress,
     UploadBatch,
 )
+from .previews import collect_preview_book_ids
+
+
+class FolderListSerializer(serializers.ListSerializer):
+    """A folder listing whose cover previews are looked up once for the page.
+
+    The counts on each folder are already a query apiece; letting previews do
+    the same would make browsing cost work proportional to folders squared,
+    which nobody notices until someone else's library is the one being browsed.
+    """
+
+    def to_representation(self, data):
+        folders = list(data.all() if isinstance(data, Manager) else data)
+        self.context["_folder_previews"] = collect_preview_book_ids(folders)
+        return super().to_representation(folders)
 
 
 class FolderSerializer(serializers.ModelSerializer):
@@ -23,13 +39,17 @@ class FolderSerializer(serializers.ModelSerializer):
     book_count = serializers.SerializerMethodField()
     folder_count = serializers.SerializerMethodField()
     item_count = serializers.SerializerMethodField()
+    preview_book_ids = serializers.SerializerMethodField()
 
     class Meta:
         model = Folder
+        list_serializer_class = FolderListSerializer
         fields = ("id", "name", "parent", "path", "has_children", "book_count",
-                  "folder_count", "item_count", "deleted_at", "created_at", "updated_at")
+                  "folder_count", "item_count", "preview_book_ids", "deleted_at",
+                  "created_at", "updated_at")
         read_only_fields = ("id", "path", "has_children", "book_count", "folder_count",
-                            "item_count", "deleted_at", "created_at", "updated_at")
+                            "item_count", "preview_book_ids", "deleted_at", "created_at",
+                            "updated_at")
 
     def get_has_children(self, obj) -> bool:
         return obj.children.filter(deleted_at__isnull=True).exists()
@@ -47,6 +67,18 @@ class FolderSerializer(serializers.ModelSerializer):
         books alone reported "0 items" for a folder full of books.
         """
         return self.get_folder_count(obj) + self.get_book_count(obj)
+
+    def get_preview_book_ids(self, obj) -> list[int]:
+        """Books whose covers stand in for this folder (see previews.py).
+
+        Read from a cache the list serializer fills for the whole page. A lone
+        folder — detail, create, rename — falls through to the same lookup with
+        a batch of one rather than needing a separate path.
+        """
+        cache = self.context.setdefault("_folder_previews", {})
+        if obj.pk not in cache:
+            cache.update(collect_preview_book_ids([obj]))
+        return cache.get(obj.pk, [])
 
     def validate_name(self, value: str) -> str:
         name = value.strip()

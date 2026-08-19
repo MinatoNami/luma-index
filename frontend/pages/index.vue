@@ -572,7 +572,7 @@ function itemLabel(folder: Folder): string {
              @dragover="onFolderDragOver($event, folder)"
              @dragleave="dropTarget = 'none'" @drop="onFolderDrop($event, folder)">
           <button class="card-open" type="button" @click="open(folder)">
-            <span class="folder-art"><AppIcon name="folder" :size="view === 'large' ? 34 : 26" /></span>
+            <FolderCover :folder="folder" :size="view === 'large' ? 'lg' : 'md'" />
             <span class="card-title">{{ folder.name }}</span>
             <span class="card-meta tertiary">{{ itemLabel(folder) }}</span>
           </button>
@@ -768,12 +768,6 @@ function itemLabel(folder: Folder): string {
 .card-menu { position: absolute; top: var(--space-2); right: var(--space-2);
              background: var(--surface); border-radius: var(--radius-sm); }
 .folder-card .card-open { align-content: start; }
-.folder-art {
-  display: grid; place-items: center;
-  aspect-ratio: 1 / 1.414;
-  border-radius: var(--radius-sm);
-  background: var(--accent-soft); color: var(--accent-text);
-}
 
 /* -- skeleton ----------------------------------------------------------- */
 .skeleton { pointer-events: none; }

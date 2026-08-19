@@ -7,6 +7,8 @@ export interface Folder {
   book_count: number
   folder_count: number
   item_count: number
+  /** Books whose covers stand in for this folder — see FolderCover. */
+  preview_book_ids: number[]
   deleted_at: string | null
 }
 
