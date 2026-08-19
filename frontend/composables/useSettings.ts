@@ -65,6 +65,9 @@ export function useSettings() {
       max_upload_bytes: number
       min_free_disk_bytes: number
       book_count: number
+      /** This account's allowance in bytes. 0 means unlimited. */
+      quota_bytes: number
+      used_bytes: number
     }>('/library/storage/')
   }
 

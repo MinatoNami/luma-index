@@ -305,6 +305,13 @@ MAX_UPLOAD_BYTES = env_int("LUMA_MAX_UPLOAD_BYTES", 2 * 1024**3)
 # canonical, so a full disk is not self-correcting the way a full cache is.
 MIN_FREE_DISK_BYTES = env_int("LUMA_MIN_FREE_DISK_BYTES", 2 * 1024**3)
 
+# How much each account may store, in bytes. 0 means unlimited, which is the
+# default because a single-user instance has nobody to be fair to and a limit
+# that arrives by surprise is worse than no limit. Set it before the second
+# account exists. Individual users can be given their own allowance in the
+# admin; see library/quota.py for what counts towards it.
+DEFAULT_USER_QUOTA_BYTES = env_int("LUMA_DEFAULT_USER_QUOTA_BYTES", 0)
+
 # Admin static files only. Never point this at LIBRARY_DIR — stored PDFs must
 # be served through the authorization boundary, never as static content.
 STATIC_URL = "/static/"

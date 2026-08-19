@@ -131,6 +131,8 @@ export function useLibrary() {
       free_bytes: number
       max_upload_bytes: number
       book_count: number
+      quota_bytes: number
+      used_bytes: number
     }>('/library/storage/')
   }
 

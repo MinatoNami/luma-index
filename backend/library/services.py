@@ -11,6 +11,7 @@ from django.utils import timezone
 
 from .documents import DocumentError, probe, render_thumbnail
 from .models import Book, BookSource, Folder, UploadBatch
+from .quota import QuotaExceeded, already_holds, check_quota_for
 from .storage import LibraryStorage, StorageError
 from .zip_import import ZipImportError, extract_entry, scan
 
@@ -92,6 +93,18 @@ def store_upload(owner, upload, *, folder: Folder | None = None,
                     extra={"event": "ingest.duplicate", "book_id": existing.pk})
         return existing, "duplicate"
 
+    # Charged only once the digest is known, because a file this library
+    # already holds costs nothing to file again. There is deliberately no
+    # cheaper check before the write: refusing a full account up front would
+    # reject exactly that free re-file, and the view stops at the first
+    # refusal anyway, so at most one upload is written and then discarded.
+    if not already_holds(owner, blob.storage_key):
+        try:
+            check_quota_for(owner, blob.size)
+        except QuotaExceeded:
+            storage.delete_if_unreferenced(blob.storage_key)
+            raise
+
     book = create_book(owner, folder=folder, storage_key=blob.storage_key,
                        filename=upload.name or "upload.pdf", size=blob.size,
                        content_type=getattr(upload, "content_type", "") or "application/pdf")
@@ -150,9 +163,23 @@ def process_zip_batch(batch: UploadBatch, *, storage: LibraryStorage | None = No
             if find_duplicate(batch.owner, folder, blob.storage_key):
                 batch.skipped_duplicate += 1
             else:
+                if not already_holds(batch.owner, blob.storage_key):
+                    try:
+                        check_quota_for(batch.owner, blob.size)
+                    except QuotaExceeded:
+                        storage.delete_if_unreferenced(blob.storage_key)
+                        raise
                 create_book(batch.owner, folder=folder, storage_key=blob.storage_key,
                             filename=entry.name, size=blob.size)
                 batch.imported += 1
+        except QuotaExceeded as exc:
+            # Stop the whole archive rather than failing every remaining entry
+            # for the same reason: four hundred identical error lines say
+            # nothing the first one did not, and each costs a full write first.
+            errors.append(f"Stopped at {entry.display_path}: {exc}")
+            logger.warning("zip import stopped at quota",
+                           extra={"event": "ingest.zip.quota", "batch_id": batch.pk})
+            break
         except (ZipImportError, StorageError, OSError) as exc:
             batch.failed += 1
             errors.append(f"{entry.display_path}: {exc}")

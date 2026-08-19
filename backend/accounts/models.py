@@ -59,6 +59,18 @@ class User(AbstractBaseUser, PermissionsMixin):
         help_text="Grants access to Django Admin.",
     )
 
+    # How much of the library disk this account may fill, in bytes. Blank means
+    # "whatever the instance default is", so raising the default lifts everyone
+    # who has not been given a specific allowance; 0 means no limit at all.
+    # Two sentinels rather than one because "unlimited" and "unset" are
+    # genuinely different answers, and collapsing them would make an explicit
+    # exemption silently revert the next time the default changed.
+    storage_quota_bytes = models.BigIntegerField(
+        null=True, blank=True,
+        help_text="Bytes this account may store. Blank uses the instance "
+                  "default; 0 means unlimited.",
+    )
+
     created_at = models.DateTimeField(default=timezone.now, editable=False)
     updated_at = models.DateTimeField(auto_now=True)
 

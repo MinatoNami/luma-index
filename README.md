@@ -134,6 +134,18 @@ Three shapes carry the design:
 Deleting is a **trash**. An uploaded PDF may be the only copy its owner has, so
 deletion is reversible and destroying it is a separate, explicit step.
 
+**Storage is charged per account**, in `library/quota.py`. What counts is the
+distinct files an account's books point at, trash included. Distinct, because
+the same PDF filed in two folders is two books over one blob and billing it
+twice charges for disk nobody used; per-account rather than shared, because
+whether an upload was free would otherwise depend on whether a stranger
+uploaded it first — arbitrary, and a disclosure that a file already exists.
+Trashed books count, which is also what gives emptying the trash a point. The
+limit is `LUMA_DEFAULT_USER_QUOTA_BYTES`, unlimited by default and overridable
+per user in the admin; it is a separate refusal from the free-disk floor, since
+running out of disk is everyone's problem and running out of quota is one
+library's.
+
 **Folders have no picture of their own**, so they borrow one. The API sends up
 to four book ids per folder and the browser tiles the same per-book covers it
 already shows in the grid — there is no composited folder image anywhere, and so
@@ -206,10 +218,9 @@ has to be checked in a real browser.**
 
 | What | Consequence |
 | --- | --- |
-| **Per-user storage quotas** | A global maximum upload size and a free-disk floor exist, but nothing stops one account filling the disk. |
 | **Real email delivery** | Password reset works, but the console backend prints reset links into the log. Point `LUMA_EMAIL_BACKEND` at an SMTP relay before a second person has an account. |
 | **Off-box backups** | `deploy.sh backup` writes to the host it is backing up. The restore procedure itself has been rehearsed — see [the drill](docs/deployment.md#the-restore-drill) — but copying dumps and the `library` volume elsewhere is still manual. |
-| **Emptying the trash automatically** | Trashed items stay until deleted by hand. |
+| **Emptying the trash automatically** | Trashed items stay until deleted by hand, and they count towards a storage quota the whole time. |
 | **Sharing with named people or groups** | §16 keeps this to private or shared-with-everyone-signed-in. The richer model is §43 future work and would change `library/permissions.py` alone. |
 
 ### Open question
@@ -232,7 +243,7 @@ tuning question now rather than a design one.
 | 6 — Sharing | Built |
 | 7 — Hardening | Built |
 
-338 backend tests, including a 64-case object-level permission matrix.
+358 backend tests, including a 64-case object-level permission matrix.
 
 ---
 

@@ -9,7 +9,28 @@ const profile = ref<Profile | null>(null)
 const displayName = ref('')
 const theme = ref<Theme>('system')
 const libraryView = ref<LibraryView>('list')
-const usage = ref<{ free_bytes: number; max_upload_bytes: number; book_count: number } | null>(null)
+const usage = ref<{
+  free_bytes: number; max_upload_bytes: number; book_count: number
+  quota_bytes: number; used_bytes: number
+} | null>(null)
+
+// 0 is the API's way of saying "no limit", which is a different thing from a
+// limit of nothing — so a bar is only meaningful when there is one.
+const quota = computed(() => {
+  const u = usage.value
+  if (!u || !u.quota_bytes) return null
+  const fraction = Math.min(1, u.used_bytes / u.quota_bytes)
+  return {
+    used: u.used_bytes,
+    limit: u.quota_bytes,
+    percent: Math.round(fraction * 100),
+    // Rounding hides the two states that matter most, so they are decided on
+    // the real numbers: 99.6% must not render as a full bar, and being over
+    // must not render as merely nearly full.
+    full: u.used_bytes >= u.quota_bytes,
+    nearly: fraction >= 0.9 && u.used_bytes < u.quota_bytes,
+  }
+})
 
 const saving = ref('')
 const errors = ref<Record<string, string>>({})
@@ -228,8 +249,27 @@ const removeAccount = () => run('delete', async () => {
           <p class="muted">Uploaded files live on this server.</p>
         </div>
         <div class="card-body">
+          <div v-if="quota" class="quota">
+            <div class="quota-head">
+              <strong>{{ formatBytes(quota.used) }} of {{ formatBytes(quota.limit) }}</strong>
+              <span class="tertiary">{{ quota.percent }}%</span>
+            </div>
+            <div class="meter" role="progressbar" :aria-valuenow="quota.percent"
+                 aria-valuemin="0" aria-valuemax="100"
+                 :aria-label="`Storage used: ${quota.percent} per cent`">
+              <span class="fill" :class="{ nearly: quota.nearly, full: quota.full }"
+                    :style="{ width: `${Math.max(quota.percent, 2)}%` }" />
+            </div>
+            <p v-if="quota.full" class="inline-error">
+              You are at your limit. Delete something, or empty your trash, to upload again.
+            </p>
+            <p v-else class="muted">
+              Books in your trash still count. Files stored more than once count once.
+            </p>
+          </div>
           <dl class="facts">
             <dt>Books</dt><dd>{{ usage.book_count }}</dd>
+            <dt v-if="!quota">Library size</dt><dd v-if="!quota">{{ formatBytes(usage.used_bytes) }}</dd>
             <dt>Disk free</dt><dd>{{ formatBytes(usage.free_bytes) }}</dd>
             <dt>Largest upload</dt><dd>{{ formatBytes(usage.max_upload_bytes) }}</dd>
           </dl>
@@ -333,4 +373,22 @@ select:focus-visible { outline: none; border-color: var(--focus); box-shadow: va
 .row-actions { display: flex; gap: var(--space-2); justify-content: flex-end; }
 code { font-family: var(--font-mono); font-size: 0.9em; padding: 1px 5px;
        background: var(--surface-sunken); border-radius: 4px; }
+
+/* -- storage quota ------------------------------------------------------- */
+.quota { display: grid; gap: var(--space-2); margin-bottom: var(--space-4); }
+.quota-head { display: flex; justify-content: space-between; align-items: baseline; }
+
+.meter {
+  height: 8px; border-radius: var(--radius-full);
+  background: var(--surface-sunken); overflow: hidden;
+}
+.fill {
+  display: block; height: 100%;
+  background: var(--accent); border-radius: var(--radius-full);
+  transition: width var(--duration) var(--ease);
+}
+.fill.nearly { background: var(--warning); }
+.fill.full { background: var(--danger); }
+
+@media (prefers-reduced-motion: reduce) { .fill { transition: none; } }
 </style>

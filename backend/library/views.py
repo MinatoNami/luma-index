@@ -39,6 +39,7 @@ from .models import (
 )
 from .outline import outline_for
 from .permissions import can_modify, can_read, readable_books
+from .quota import QuotaExceeded, ensure_room, limit_for, usage_for
 from .ranges import serve_file
 from .serializers import (
     BookmarkSerializer,
@@ -413,7 +414,7 @@ class UploadView(OwnedMixin, APIView):
         summary="Upload PDFs or a ZIP archive",
         request=UploadRequestSerializer,
         responses={201: OpenApiResponse(description="Imported books, or a queued batch"),
-                   507: OpenApiResponse(description="Not enough disk space")},
+                   507: OpenApiResponse(description="Out of disk space, or over quota")},
     )
     def post(self, request):
         folder = None
@@ -437,7 +438,7 @@ class UploadView(OwnedMixin, APIView):
             try:
                 book, outcome = store_upload(request.user, upload, folder=folder,
                                              storage=storage)
-            except InsufficientSpace as exc:
+            except (InsufficientSpace, QuotaExceeded) as exc:
                 return Response({"detail": str(exc)},
                                 status=status.HTTP_507_INSUFFICIENT_STORAGE)
             except IngestError as exc:
@@ -454,7 +455,7 @@ class UploadView(OwnedMixin, APIView):
         for archive in archives:
             try:
                 batch = self._stage(request, archive, folder, storage)
-            except InsufficientSpace as exc:
+            except (InsufficientSpace, QuotaExceeded) as exc:
                 return Response({"detail": str(exc)},
                                 status=status.HTTP_507_INSUFFICIENT_STORAGE)
             results["batches"].append(
@@ -475,6 +476,10 @@ class UploadView(OwnedMixin, APIView):
         if max_bytes and archive.size > max_bytes:
             raise IngestError(f"That archive exceeds the {max_bytes // 1024**2} MiB limit.")
         storage.check_space_for(archive.size)
+        # The archive's own bytes are not charged — they are deleted once read —
+        # but an account with no room left should hear so now rather than after
+        # the worker has extracted four hundred books it cannot keep.
+        ensure_room(request.user)
 
         staging = Path(settings.UPLOAD_STAGING_DIR)
         staging.mkdir(parents=True, exist_ok=True)
@@ -537,6 +542,10 @@ class StorageStatusView(OwnedMixin, APIView):
             "max_upload_bytes": settings.MAX_UPLOAD_BYTES,
             "min_free_disk_bytes": settings.MIN_FREE_DISK_BYTES,
             "book_count": self.books().live().count(),
+            # 0 means unlimited. Usage is reported either way — what your
+            # library weighs is worth knowing without a limit on it.
+            "quota_bytes": limit_for(request.user),
+            "used_bytes": usage_for(request.user),
         })
 
 

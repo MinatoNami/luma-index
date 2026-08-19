@@ -25,7 +25,8 @@ class UserAdmin(DjangoUserAdmin):
     change_password_form = AdminPasswordChangeForm
     model = User
 
-    list_display = ("email", "display_name", "role", "is_active", "is_staff", "created_at")
+    list_display = ("email", "display_name", "role", "is_active", "is_staff",
+                    "storage_quota_bytes", "created_at")
     list_filter = ("role", "is_active", "is_staff", "is_superuser")
     search_fields = ("email", "display_name")
     ordering = ("email",)
@@ -34,6 +35,12 @@ class UserAdmin(DjangoUserAdmin):
     fieldsets = (
         (None, {"fields": ("email", "password")}),
         ("Profile", {"fields": ("display_name",)}),
+        ("Storage", {
+            "fields": ("storage_quota_bytes",),
+            "description": "Blank uses LUMA_DEFAULT_USER_QUOTA_BYTES; 0 means unlimited. "
+                           "Counts the distinct files this account's books point at, "
+                           "trash included.",
+        }),
         ("Permissions", {
             "fields": ("role", "is_active", "is_staff", "is_superuser", "groups",
                        "user_permissions"),
