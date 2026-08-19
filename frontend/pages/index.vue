@@ -839,7 +839,16 @@ function itemLabel(folder: Folder): string {
 
 .topbar {
   display: flex; align-items: center; justify-content: space-between; gap: var(--space-4);
-  padding: var(--space-3) var(--space-5);
+  /* max(), not the bare space: the viewport is declared viewport-fit=cover, so
+     on a notched phone — and in particular once this is on the Home Screen and
+     runs without Safari's chrome — the bar is drawn under the status bar.
+     Written here rather than in main.css because a scoped rule carries an
+     attribute selector and outranks a global `.topbar`, and this shorthand
+     would reset padding-top even if it did not. */
+  padding: max(var(--space-3), env(safe-area-inset-top))
+           max(var(--space-5), env(safe-area-inset-right))
+           var(--space-3)
+           max(var(--space-5), env(safe-area-inset-left));
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   position: sticky; top: 0; z-index: 20;
@@ -1000,7 +1009,8 @@ function itemLabel(folder: Folder): string {
   .row { grid-template-columns: 30px minmax(0, 1fr) 32px 40px; }
   .row > .cell:nth-child(3), .row > .cell:nth-child(4),
   .row.head > span:nth-child(3), .row.head > span:nth-child(4) { display: none; }
-  .topbar { padding-inline: var(--space-4); }
+  .topbar { padding-inline: max(var(--space-4), env(safe-area-inset-left))
+                            max(var(--space-4), env(safe-area-inset-right)); }
   .who { display: none; }
 }
 
@@ -1012,7 +1022,9 @@ function itemLabel(folder: Folder): string {
    The labels go and the icons stay. The words remain in the markup for screen
    readers, and each link keeps a 40px target. */
 @media (max-width: 30rem) {
-  .topbar { padding-inline: var(--space-3); gap: var(--space-2); }
+  .topbar { padding-inline: max(var(--space-3), env(safe-area-inset-left))
+                            max(var(--space-3), env(safe-area-inset-right));
+            gap: var(--space-2); }
   .brand strong { font-size: var(--text-base); }
   .account { gap: var(--space-1); }
   .quiet-link {

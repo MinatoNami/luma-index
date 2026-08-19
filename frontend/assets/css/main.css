@@ -80,26 +80,17 @@ input[type="search"] { appearance: none; }
 }
 
 /* Safe areas ------------------------------------------------------------- */
-/* The viewport is declared `viewport-fit=cover`, so on a notched phone — and
-   especially once this is added to the Home Screen and runs without Safari's
-   chrome — the page is drawn under the status bar and the home indicator.
-   Anything pinned to an edge has to put the inset back itself.
+/* The viewport is declared `viewport-fit=cover`, so a notched phone draws the
+   page under the status bar and the home indicator — most visibly once this is
+   on the Home Screen and running without Safari's chrome.
 
-   Global rather than per-page: these bars are scoped styles in four different
-   files, and a rule that only some of them remembered is the kind that breaks
-   on whichever page nobody checked. */
-.topbar {
-  padding-top: max(var(--space-3), env(safe-area-inset-top));
-  padding-left: max(var(--space-5), env(safe-area-inset-left));
-  padding-right: max(var(--space-5), env(safe-area-inset-right));
-}
-.reader-shell .bar {
-  padding-top: max(var(--space-2), env(safe-area-inset-top));
-  padding-left: max(var(--space-3), env(safe-area-inset-left));
-  padding-right: max(var(--space-3), env(safe-area-inset-right));
-}
-/* The reader fills the screen, so its own scrolling area owes the home
-   indicator room at the bottom. */
+   The bars that sit against those edges add the insets in their own scoped
+   styles, not here: a scoped selector carries an attribute and outranks a
+   global `.topbar`, and those rules use the `padding` shorthand, which resets
+   any padding-top a global rule managed to set. Putting it here looked right
+   and did nothing at all.
+
+   This one stays global because nothing scoped sets padding on it. */
 .reader-shell .viewport { padding-bottom: env(safe-area-inset-bottom); }
 
 /* PDF.js measures text by appending a scratch canvas straight to <body>. It is

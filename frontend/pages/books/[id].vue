@@ -536,7 +536,13 @@ useHead({ title: computed(() => book.value ? `${book.value.title} — LumaIndex`
 .reader-shell { height: 100dvh; display: flex; flex-direction: column; background: var(--bg); }
 .bar {
   display: flex; align-items: center; gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
+  /* Same reasoning as the library's topbar: viewport-fit=cover puts this under
+     the status bar on a notched phone, and a scoped selector outranks anything
+     global that tried to add the inset from outside. */
+  padding: max(var(--space-2), env(safe-area-inset-top))
+           max(var(--space-3), env(safe-area-inset-right))
+           var(--space-2)
+           max(var(--space-3), env(safe-area-inset-left));
   background: var(--surface); border-bottom: 1px solid var(--border);
   flex: none;
 }
