@@ -8,14 +8,16 @@ import type { Folder } from '~/composables/useLibrary'
  * with hundreds of folders would otherwise be one large request every time
  * someone moves a single file.
  *
- * The item being moved is excluded from the list so it cannot be dropped into
- * itself. Deeper cycles — a folder into its own descendant — are refused by the
- * server, and its message is shown as-is rather than duplicating the rule here.
+ * The folders being moved are excluded from the list so none can be dropped
+ * into itself — all of them, not just the first, or a selection of twenty would
+ * offer nineteen destinations that are certain to be skipped. Deeper cycles — a
+ * folder into its own descendant — are refused by the server, and its message
+ * is shown as-is rather than duplicating the rule here.
  */
 const props = withDefaults(defineProps<{
   title: string
-  /** A folder being moved cannot be its own destination. */
-  excludeFolderId?: number | null
+  /** Folders being moved cannot be their own destination. */
+  excludeFolderId?: number | number[] | null
   /** Where the item lives now, so "already here" can be disabled. */
   currentFolderId?: number | null
   busy?: boolean
@@ -25,6 +27,14 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{ choose: [number | null]; cancel: [] }>()
 
 const library = useLibrary()
+
+// One id or many, so a single move and a selection can share this component
+// without the caller having to know which shape it wants.
+const excluded = computed(() => new Set(
+  props.excludeFolderId === null || props.excludeFolderId === undefined
+    ? []
+    : [props.excludeFolderId].flat(),
+))
 
 const parent = ref<number | null>(null)
 const trail = ref<Folder[]>([])
@@ -59,7 +69,7 @@ async function goRoot() {
 onMounted(() => open(null))
 
 const selectable = computed(() =>
-  folders.value.filter(f => f.id !== props.excludeFolderId))
+  folders.value.filter(f => !excluded.value.has(f.id)))
 
 // Moving something to where it already is would be a no-op request.
 const alreadyHere = computed(() => parent.value === props.currentFolderId)

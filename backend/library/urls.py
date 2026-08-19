@@ -49,6 +49,8 @@ urlpatterns = [
     path("uploads/<int:batch_id>/", views.UploadBatchDetailView.as_view(),
          name="upload-batch-detail"),
 
+    path("bulk/", views.BulkActionView.as_view(), name="bulk"),
+
     path("trash/", views.TrashView.as_view(), name="trash"),
     path("storage/", views.StorageStatusView.as_view(), name="storage"),
 ]

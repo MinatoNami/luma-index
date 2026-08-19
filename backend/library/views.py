@@ -24,6 +24,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from . import bulk
 from .lifecycle import readers_of, set_visibility
 from .models import (
     Book,
@@ -44,6 +45,7 @@ from .ranges import serve_file
 from .serializers import (
     BookmarkSerializer,
     BookSerializer,
+    BulkActionSerializer,
     CollectionSerializer,
     FolderSerializer,
     HighlightSerializer,
@@ -515,6 +517,47 @@ class UploadBatchDetailView(OwnedMixin, APIView):
         if batch is None:
             raise Http404
         return Response(UploadBatchSerializer(batch, context={"request": request}).data)
+
+
+# --------------------------------------------------------------------------- #
+# Acting on a selection
+# --------------------------------------------------------------------------- #
+
+@csrf_required
+class BulkActionView(OwnedMixin, APIView):
+    """One action across a selection of folders and books.
+
+    Always 200 with a report, never a partial 4xx: the interesting answer is
+    "eight moved, two were already there", and an error status would throw
+    away the eight.
+    """
+
+    @extend_schema(
+        summary="Act on several items at once",
+        request=BulkActionSerializer,
+        responses={200: OpenApiResponse(description="Counts, and anything skipped")},
+    )
+    def post(self, request):
+        form = BulkActionSerializer(data=request.data)
+        form.is_valid(raise_exception=True)
+        data = form.validated_data
+        action = data["action"]
+        folders, books = data["folders"], data["books"]
+
+        if action == "move":
+            target = self.get_folder(data["folder"]) if data.get("folder") else None
+            result = bulk.move(request.user, folders, books, target)
+        elif action == "trash":
+            result = bulk.trash(request.user, folders, books)
+        elif action in ("favourite", "unfavourite"):
+            result = bulk.set_favourite(request.user, books, action == "favourite")
+        else:
+            collection = CollectionDetailView.get_collection(self, request, data["collection"])
+            result = bulk.add_to_collection(request.user, books, collection)
+
+        logger.info("bulk action", extra={"event": "library.bulk", "action": action,
+                                          **result.as_dict(), "skipped": len(result.skipped)})
+        return Response(result.as_dict())
 
 
 # --------------------------------------------------------------------------- #

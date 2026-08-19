@@ -24,7 +24,7 @@ Caddy and a background worker — reachable over
 | | |
 | --- | --- |
 | **Upload** | Drag PDFs in from your computer — onto the page, or straight onto a folder. A ZIP has its folder structure rebuilt on import. Identical files are stored once. |
-| **Organise** | Folders you create, rename, and delete. Drag items onto a folder to move them, or use the picker on any row. Each folder wears a mosaic of the covers inside it. Deleting goes to a trash you can restore from. |
+| **Organise** | Folders you create, rename, and delete. Drag items onto a folder to move them, or use the picker on any row. Tick several — shift-click for a run — and move, trash, favourite or collect them in one go. Each folder wears a mosaic of the covers inside it. Deleting goes to a trash you can restore from. |
 | **Read** | A PDF.js reader: continuous scroll or single page, zoom, text selection, search within the book, an outline sidebar, page thumbnails. |
 | **Resume** | Your place is saved as you read and picked up on any other device. |
 | **Annotate** | Bookmarks, highlighted passages in four colours, notes on a highlight, and page notes for scans with no text layer. |
@@ -133,6 +133,14 @@ Three shapes carry the design:
 
 Deleting is a **trash**. An uploaded PDF may be the only copy its owner has, so
 deletion is reversible and destroying it is a separate, explicit step.
+
+**A selection is acted on in one request**, through `library/bulk.py`. Every
+operation there is partial by design: an item that cannot be acted on is
+skipped with a reason and the rest still go through, so moving forty books into
+a folder that already holds one of their names reports the collision instead of
+leaving the user to work out which thirty-nine arrived. Ids belonging to
+someone else are filtered out rather than rejected — saying which of a hundred
+ids was refused would confirm the row exists.
 
 **Storage is charged per account**, in `library/quota.py`. What counts is the
 distinct files an account's books point at, trash included. Distinct, because
@@ -243,7 +251,7 @@ tuning question now rather than a design one.
 | 6 — Sharing | Built |
 | 7 — Hardening | Built |
 
-358 backend tests, including a 64-case object-level permission matrix.
+377 backend tests, including a 64-case object-level permission matrix.
 
 ---
 

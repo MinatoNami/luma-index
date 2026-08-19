@@ -39,6 +39,7 @@ const moveError = ref('')
 const collections = useCollections()
 const inCollection = ref<{ id: number; title: string } | null>(null)
 
+
 // The virtual views from §12. A view and a folder are mutually exclusive:
 // "favourites" is not a place in the tree.
 type LibraryView = 'files' | 'favourites' | 'recent' | 'unsorted'
@@ -217,6 +218,86 @@ const breadcrumbs = computed<Folder[]>(() => data.value?.detail?.ancestors ?? []
 const loading = computed(() => pending.value && !data.value?.folders.length
   && !data.value?.books.length)
 
+// -- selection -------------------------------------------------------------- //
+
+// Folders before books, matching the order they are drawn, so a shift-click
+// range covers exactly the rows between the two that were clicked.
+const selectable = computed(() => [
+  ...folders.value.map(f => ({ kind: 'folder' as const, id: f.id })),
+  ...books.value.map(b => ({ kind: 'book' as const, id: b.id })),
+])
+const selection = useSelection(selectable)
+const bulkMoving = ref(false)
+const bulkCollecting = ref(false)
+
+/** Open the item, unless the click was a selection gesture. */
+function rowClick(kind: 'folder' | 'book', id: number, event: MouseEvent, open?: () => void) {
+  if (selection.handleClick(kind, id, event)) {
+    event.preventDefault()
+    return
+  }
+  open?.()
+}
+
+async function runBulk(payload: Parameters<typeof library.bulk>[0], verb: string) {
+  busy.value = true
+  error.value = ''
+  notice.value = ''
+  try {
+    const result = await library.bulk({
+      folders: selection.folderIds.value,
+      books: selection.bookIds.value,
+      ...payload,
+    })
+    const moved = result.folders + result.books
+    const parts = [`${verb} ${moved} item${moved === 1 ? '' : 's'}`]
+    // Skipped items are the reason this endpoint reports instead of failing;
+    // swallowing them here would waste that.
+    if (result.skipped.length) {
+      const reasons = [...new Set(result.skipped.map(s => s.reason))]
+      parts.push(`${result.skipped.length} skipped — ${reasons.join(' ')}`)
+    }
+    notice.value = parts.join(' · ')
+    selection.clear()
+    await load({ quiet: true })
+  } catch (err: any) {
+    error.value = err?.data?.detail || 'That did not work.'
+  } finally {
+    busy.value = false
+    bulkMoving.value = false
+    bulkCollecting.value = false
+  }
+}
+
+function bulkTrash() {
+  const n = selection.count.value
+  dialog.value = {
+    title: `Move ${n} item${n === 1 ? '' : 's'} to the trash?`,
+    message: selection.folderIds.value.length
+      ? 'Everything inside the selected folders goes too. You can restore it from the trash.'
+      : 'You can restore them from the trash.',
+    confirmLabel: 'Move to trash',
+    danger: true,
+    run: async () => { await runBulk({ action: 'trash' }, 'Trashed') },
+  }
+}
+
+function onKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && selection.active.value) {
+    selection.clear()
+    return
+  }
+  // Only when a selection is already running, or this would steal the browser's
+  // select-all from someone reading the page.
+  const typing = (event.target as HTMLElement | null)?.closest('input, textarea')
+  if ((event.metaKey || event.ctrlKey) && event.key === 'a' && selection.active.value && !typing) {
+    event.preventDefault()
+    selection.selectAll()
+  }
+}
+onMounted(() => window.addEventListener('keydown', onKeydown))
+onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
+
 async function load(_options: { quiet?: boolean } = {}) {
   error.value = ''
   try {
@@ -246,12 +327,16 @@ function goTo(id: number | null) {
   router.push({ query: id === null ? {} : { folder: String(id) } })
 }
 
-async function act(work: () => Promise<unknown>, message = '') {
+async function act(work: () => Promise<unknown>, message?: string) {
   busy.value = true
   error.value = ''
+  // Cleared before the work rather than overwritten after it, so an action
+  // that reports its own outcome — a bulk action counting what it skipped —
+  // still has its message standing when this returns.
+  notice.value = ''
   try {
     await work()
-    notice.value = message
+    if (message) notice.value = message
     await load({ quiet: true })
   } catch (err: any) {
     error.value = err?.data?.detail || 'That did not work.'
@@ -504,6 +589,20 @@ function itemLabel(folder: Folder): string {
         </li>
       </ul>
 
+      <SelectionBar v-if="selection.active.value"
+                    :count="selection.count.value"
+                    :folders="selection.folderIds.value.length"
+                    :books="selection.bookIds.value.length"
+                    :all-selected="selection.allSelected.value"
+                    :busy="busy"
+                    @move="bulkMoving = true"
+                    @collect="bulkCollecting = true"
+                    @favourite="runBulk({ action: 'favourite' }, 'Favourited')"
+                    @unfavourite="runBulk({ action: 'unfavourite' }, 'Unfavourited')"
+                    @trash="bulkTrash"
+                    @select-all="selection.selectAll"
+                    @clear="selection.clear" />
+
       <!-- Skeleton, empty, or content — never two at once ------------- -->
       <div v-if="loading" :class="['cards', view === 'list' ? 'grid' : view]">
         <div v-for="n in 8" :key="n" class="card panel skeleton">
@@ -525,14 +624,27 @@ function itemLabel(folder: Folder): string {
       <!-- List --------------------------------------------------------- -->
       <div v-else-if="view === 'list'" class="listing panel">
         <div class="row head">
+          <span class="pick">
+            <input type="checkbox" :checked="selection.allSelected.value"
+                   :indeterminate="selection.active.value && !selection.allSelected.value"
+                   aria-label="Select everything here"
+                   @change="selection.allSelected.value ? selection.clear() : selection.selectAll()" />
+          </span>
           <span>Name</span><span>Size</span><span>Pages</span><span />
         </div>
         <div v-for="folder in folders" :key="`f${folder.id}`" class="row"
-             :class="{ 'drop-into': dropTarget === folder.id }" draggable="true"
+             :class="{ 'drop-into': dropTarget === folder.id,
+                       'is-selected': selection.has('folder', folder.id) }" draggable="true"
              @dragstart="onRowDragStart($event, 'folder', folder.id)" @dragend="onRowDragEnd"
              @dragover="onFolderDragOver($event, folder)"
              @dragleave="dropTarget = 'none'" @drop="onFolderDrop($event, folder)">
-          <button class="cell name" type="button" @click="open(folder)">
+          <span class="pick">
+            <input type="checkbox" :checked="selection.has('folder', folder.id)"
+                   :aria-label="`Select ${folder.name}`"
+                   @click.stop @change="selection.toggle('folder', folder.id)" />
+          </span>
+          <button class="cell name" type="button"
+                  @click="rowClick('folder', folder.id, $event, () => open(folder))">
             <span class="folder-chip"><AppIcon name="folder" :size="17" /></span>
             <span class="label">{{ folder.name }}</span>
           </button>
@@ -540,9 +652,16 @@ function itemLabel(folder: Folder): string {
           <span class="cell" />
           <RowMenu :actions="folderActions(folder)" :label="`Actions for ${folder.name}`" />
         </div>
-        <div v-for="book in books" :key="`b${book.id}`" class="row" draggable="true"
+        <div v-for="book in books" :key="`b${book.id}`" class="row"
+             :class="{ 'is-selected': selection.has('book', book.id) }" draggable="true"
              @dragstart="onRowDragStart($event, 'book', book.id)" @dragend="onRowDragEnd">
-          <NuxtLink class="cell name" :to="bookHref(book)">
+          <span class="pick">
+            <input type="checkbox" :checked="selection.has('book', book.id)"
+                   :aria-label="`Select ${book.title}`"
+                   @click.stop @change="selection.toggle('book', book.id)" />
+          </span>
+          <NuxtLink class="cell name" :to="bookHref(book)"
+                    @click="rowClick('book', book.id, $event)">
             <BookCover :book="book" size="sm" />
             <span class="label">{{ book.title }}</span>
             <span v-if="book.visibility === 'shared'" class="badge-shared">shared</span>
@@ -567,11 +686,19 @@ function itemLabel(folder: Folder): string {
       <div v-else :class="['cards', view]">
         <div v-for="folder in folders" :key="`f${folder.id}`"
              class="card folder-card panel"
-             :class="{ 'drop-into': dropTarget === folder.id }" draggable="true"
+             :class="{ 'drop-into': dropTarget === folder.id,
+                       'is-selected': selection.has('folder', folder.id) }" draggable="true"
              @dragstart="onRowDragStart($event, 'folder', folder.id)" @dragend="onRowDragEnd"
              @dragover="onFolderDragOver($event, folder)"
              @dragleave="dropTarget = 'none'" @drop="onFolderDrop($event, folder)">
-          <button class="card-open" type="button" @click="open(folder)">
+          <label class="card-pick" :class="{ on: selection.has('folder', folder.id) }"
+                 @click.stop>
+            <input type="checkbox" :checked="selection.has('folder', folder.id)"
+                   :aria-label="`Select ${folder.name}`"
+                   @change="selection.toggle('folder', folder.id)" />
+          </label>
+          <button class="card-open" type="button"
+                  @click="rowClick('folder', folder.id, $event, () => open(folder))">
             <FolderCover :folder="folder" :size="view === 'large' ? 'lg' : 'md'" />
             <span class="card-title">{{ folder.name }}</span>
             <span class="card-meta tertiary">{{ itemLabel(folder) }}</span>
@@ -579,9 +706,16 @@ function itemLabel(folder: Folder): string {
           <RowMenu class="card-menu" :actions="folderActions(folder)"
                    :label="`Actions for ${folder.name}`" />
         </div>
-        <div v-for="book in books" :key="`b${book.id}`" class="card panel" draggable="true"
+        <div v-for="book in books" :key="`b${book.id}`" class="card panel"
+             :class="{ 'is-selected': selection.has('book', book.id) }" draggable="true"
              @dragstart="onRowDragStart($event, 'book', book.id)" @dragend="onRowDragEnd">
-          <NuxtLink class="card-open" :to="bookHref(book)">
+          <label class="card-pick" :class="{ on: selection.has('book', book.id) }" @click.stop>
+            <input type="checkbox" :checked="selection.has('book', book.id)"
+                   :aria-label="`Select ${book.title}`"
+                   @change="selection.toggle('book', book.id)" />
+          </label>
+          <NuxtLink class="card-open" :to="bookHref(book)"
+                    @click="rowClick('book', book.id, $event)">
             <BookCover :book="book" :size="view === 'large' ? 'lg' : 'md'" />
             <span class="card-title">{{ book.title }}</span>
             <span class="card-meta tertiary">
@@ -616,6 +750,18 @@ function itemLabel(folder: Folder): string {
                       :book-title="inCollection.title"
                       @cancel="inCollection = null"
                       @done="inCollection = null; load({ quiet: true })" />
+
+    <FolderPicker v-if="bulkMoving"
+                  :title="`Move ${selection.count.value} item${selection.count.value === 1 ? '' : 's'}`"
+                  :exclude-folder-id="selection.folderIds.value"
+                  :current-folder-id="currentId"
+                  :busy="busy" :error="error"
+                  @cancel="bulkMoving = false"
+                  @choose="(id) => runBulk({ action: 'move', folder: id }, 'Moved')" />
+
+    <CollectionChooser v-if="bulkCollecting" :count="selection.bookIds.value.length"
+                       @cancel="bulkCollecting = false"
+                       @choose="(id) => runBulk({ action: 'collect', collection: id }, 'Added')" />
 
     <FolderPicker v-if="moving" :title="`Move “${moving.name}”`"
                   :exclude-folder-id="moving.kind === 'folder' ? moving.id : null"
@@ -700,7 +846,7 @@ function itemLabel(folder: Folder): string {
 .listing { overflow: hidden; }
 .row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 8rem 5rem 32px 40px;
+  grid-template-columns: 30px minmax(0, 1fr) 8rem 5rem 32px 40px;
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-2) var(--space-3);
@@ -797,5 +943,36 @@ function itemLabel(folder: Folder): string {
   .row.head > span:nth-child(2), .row.head > span:nth-child(3) { display: none; }
   .topbar { padding-inline: var(--space-4); }
   .who { display: none; }
+}
+
+/* -- selection ----------------------------------------------------------- */
+.pick { display: grid; place-items: center; }
+.pick input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+
+.row.is-selected, .card.is-selected { background: var(--accent-soft); }
+.card.is-selected { box-shadow: 0 0 0 2px var(--accent); }
+
+/* Out of the way until it is wanted: a checkbox on every card at rest turns a
+   library into a form. Hover, keyboard focus, and being ticked all reveal it. */
+.card-pick {
+  position: absolute; top: var(--space-2); left: var(--space-2); z-index: 1;
+  display: grid; place-items: center;
+  width: 24px; height: 24px; border-radius: var(--radius-sm);
+  background: var(--surface); box-shadow: var(--shadow-sm);
+  opacity: 0; transition: opacity var(--duration) var(--ease);
+  cursor: pointer;
+}
+.card:hover .card-pick,
+.card-pick:focus-within,
+.card-pick.on { opacity: 1; }
+.card-pick input { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
+
+/* Touch has no hover, so there would be no way to reach it at all. */
+@media (hover: none) {
+  .card-pick { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-pick { transition: none; }
 }
 </style>

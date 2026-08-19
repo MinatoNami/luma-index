@@ -310,3 +310,39 @@ class CollectionSerializer(serializers.ModelSerializer):
             # would leak another user's structure.
             raise serializers.ValidationError("No such collection.")
         return value
+
+
+class BulkActionSerializer(serializers.Serializer):
+    """One action, applied to a selection of folders and books.
+
+    Ids are plain integers rather than model fields on purpose: an id that
+    belongs to somebody else has to be *skipped*, not rejected, and a
+    PrimaryKeyRelatedField would fail the whole request while confirming the
+    row exists.
+    """
+
+    ACTIONS = ("move", "trash", "favourite", "unfavourite", "collect")
+
+    action = serializers.ChoiceField(choices=ACTIONS)
+    folders = serializers.ListField(child=serializers.IntegerField(), required=False,
+                                    default=list, max_length=1000)
+    books = serializers.ListField(child=serializers.IntegerField(), required=False,
+                                  default=list, max_length=1000)
+    # Target of a move. Absent and null mean different things — null is the top
+    # level, absent is "no target given" — so it is validated in validate().
+    folder = serializers.IntegerField(required=False, allow_null=True)
+    collection = serializers.IntegerField(required=False)
+
+    def validate(self, attrs):
+        action = attrs["action"]
+        if action == "move" and "folder" not in self.initial_data:
+            raise serializers.ValidationError({"folder": "Say where to move them."})
+        if action == "collect" and not attrs.get("collection"):
+            raise serializers.ValidationError({"collection": "Say which collection."})
+        if not attrs["folders"] and not attrs["books"]:
+            raise serializers.ValidationError("Nothing was selected.")
+        if action in ("favourite", "unfavourite", "collect") and attrs["folders"]:
+            raise serializers.ValidationError(
+                {"folders": "That only applies to books."}
+            )
+        return attrs

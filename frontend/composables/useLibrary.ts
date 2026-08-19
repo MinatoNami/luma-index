@@ -126,6 +126,23 @@ export function useLibrary() {
     return await api<UploadBatch>(`/library/uploads/${id}/`)
   }
 
+  /** One action across a selection. Always resolves with a report. */
+  async function bulk(payload: {
+    action: 'move' | 'trash' | 'favourite' | 'unfavourite' | 'collect'
+    folders?: number[]
+    books?: number[]
+    /** Destination for a move. null is the top level. */
+    folder?: number | null
+    collection?: number
+  }) {
+    await ensureCsrf()
+    return await api<{
+      folders: number
+      books: number
+      skipped: { kind: 'folder' | 'book'; id: number; reason: string }[]
+    }>('/library/bulk/', { method: 'POST', body: payload })
+  }
+
   async function storage() {
     return await api<{
       free_bytes: number
@@ -140,7 +157,7 @@ export function useLibrary() {
     listFolders, listBooks, folderDetail,
     createFolder, updateFolder, updateBook,
     trashFolder, trashBook, restoreFolder, restoreBook, deleteForever, listTrash,
-    upload, batch, storage,
+    upload, batch, storage, bulk,
   }
 }
 
