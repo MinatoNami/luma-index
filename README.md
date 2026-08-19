@@ -142,7 +142,11 @@ id where a click position was expected, so `activeHighlightRecord` looked for
 rendered. Clicking a highlight in the sidebar jumped to the page and then did
 nothing at all.
 
-**A large upload is sent in pieces**, in `library/chunked.py`. One multipart
+**A large upload is sent in pieces**, in `library/chunked.py`, and what it
+becomes at the end depends on what it is: a PDF goes to `store_upload`, a ZIP
+is handed to the ingest worker as a batch. Sending an archive down the PDF path
+rejects it for not being a PDF *after every byte has arrived*, which is exactly
+what chunking did to ZIPs when it first shipped. One multipart
 POST is all-or-nothing, and on a link that drops every few minutes a 600 MB
 file never lands — each attempt starts again from zero. The server's `received`
 counter, which is the size of the bytes actually on disk rather than anything a
@@ -340,7 +344,7 @@ Python.
 | 6 — Sharing | Built |
 | 7 — Hardening | Built |
 
-445 backend tests, including a 64-case object-level permission matrix, and 44
+452 backend tests, including a 64-case object-level permission matrix, and 44
 frontend tests over the logic that has actually broken here — selection
 ranges, cover loading states, sort labels.
 

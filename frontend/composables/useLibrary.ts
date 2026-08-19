@@ -170,8 +170,11 @@ export function useLibrary() {
     for (const file of large) {
       try {
         const done = await chunker.sendOne(file, folder, onProgress)
-        if (done.outcome === 'duplicate') result.duplicates += 1
-        else result.imported.push(done.book)
+        // A ZIP is not a book yet — it is work the ingest worker still has to
+        // do, and the caller polls it exactly as for an inline archive upload.
+        if (done.outcome === 'queued' && done.batch) result.batches.push(done.batch)
+        else if (done.outcome === 'duplicate') result.duplicates += 1
+        else if (done.book) result.imported.push(done.book)
       } catch (err: any) {
         result.errors.push(`${file.name}: ${err?.data?.detail || 'upload failed'}`)
       }

@@ -599,7 +599,7 @@ class ChunkedUploadCompleteView(OwnedMixin, APIView):
             raise Http404
 
         try:
-            book, outcome = chunked.finish(upload)
+            book, outcome = chunked.finish(upload)   # a Book, or an UploadBatch
         except chunked.ChunkConflict as exc:
             return Response({"detail": str(exc), "received": exc.received},
                             status=status.HTTP_409_CONFLICT)
@@ -608,6 +608,16 @@ class ChunkedUploadCompleteView(OwnedMixin, APIView):
                             status=status.HTTP_507_INSUFFICIENT_STORAGE)
         except IngestError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        if outcome == "queued":
+            # An archive is not a book yet; it is work for the ingest worker,
+            # and the client polls the batch exactly as it does for an inline
+            # ZIP upload.
+            return Response(
+                {"outcome": outcome,
+                 "batch": UploadBatchSerializer(book, context={"request": request}).data},
+                status=status.HTTP_201_CREATED,
+            )
 
         return Response(
             {"outcome": outcome,

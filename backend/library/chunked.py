@@ -22,6 +22,7 @@ deduplication as a small one. There is no second path to keep in step.
 from __future__ import annotations
 
 import logging
+import os
 from datetime import timedelta
 from pathlib import Path
 
@@ -30,10 +31,10 @@ from django.core.files import File
 from django.db import transaction
 from django.utils import timezone
 
-from .models import ChunkedUpload, Folder
-from .quota import ensure_room
+from .models import ChunkedUpload, Folder, UploadBatch
+from .quota import QuotaExceeded, ensure_room
 from .services import IngestError, store_upload
-from .storage import LibraryStorage
+from .storage import InsufficientSpace, LibraryStorage
 
 logger = logging.getLogger("lumaindex.ingest.chunked")
 
@@ -138,7 +139,17 @@ def append(upload: ChunkedUpload, *, offset: int, stream) -> int:
 
 
 def finish(upload: ChunkedUpload, *, storage: LibraryStorage | None = None):
-    """Hand the assembled file to the ordinary upload path."""
+    """Hand the assembled file to whichever ordinary path it belongs to.
+
+    Returns `(object, outcome)`: a Book with "imported" or "duplicate", or an
+    UploadBatch with "queued" when the file was an archive.
+
+    The archive branch is the whole reason this is not a one-liner. A ZIP is
+    not stored, it is extracted by the worker, and sending it through
+    `store_upload` rejects it for not being a PDF — after every byte has
+    already arrived. That is exactly what happened when chunking was added and
+    this function only knew about PDFs.
+    """
     path = Path(upload.staged_path)
     if not path.exists():
         raise IngestError("This upload is no longer staged. Start it again.")
@@ -146,6 +157,9 @@ def finish(upload: ChunkedUpload, *, storage: LibraryStorage | None = None):
     actual = path.stat().st_size
     if actual < upload.declared_size:
         raise ChunkConflict(actual)
+
+    if upload.original_filename.lower().endswith(".zip"):
+        return _finish_archive(upload, path), "queued"
 
     storage = storage or LibraryStorage()
     try:
@@ -155,7 +169,19 @@ def finish(upload: ChunkedUpload, *, storage: LibraryStorage | None = None):
             wrapped = File(handle, name=upload.original_filename)
             book, outcome = store_upload(upload.owner, wrapped,
                                          folder=upload.target_folder, storage=storage)
-    finally:
+    except (InsufficientSpace, QuotaExceeded):
+        # Kept, not discarded. These can come right — someone empties their
+        # trash, or the other upload that filled the disk finishes — and
+        # throwing away several hundred megabytes the user already sent would
+        # make a recoverable problem cost them the whole transfer again. The
+        # stale sweep collects it if they never come back.
+        raise
+    except Exception:
+        # Anything else is about the file itself and will fail again.
+        path.unlink(missing_ok=True)
+        upload.delete()
+        raise
+    else:
         path.unlink(missing_ok=True)
         upload.delete()
 
@@ -163,6 +189,33 @@ def finish(upload: ChunkedUpload, *, storage: LibraryStorage | None = None):
                 extra={"event": "ingest.chunked.finish", "outcome": outcome,
                        "book_id": getattr(book, "pk", None)})
     return book, outcome
+
+
+def _finish_archive(upload: ChunkedUpload, path: Path) -> UploadBatch:
+    """Hand the archive to the worker, the same way an inline upload does.
+
+    Renamed rather than copied: the file is already staged and already several
+    hundred megabytes, and both paths live under UPLOAD_STAGING_DIR so this
+    stays within one filesystem.
+    """
+    staging = Path(settings.UPLOAD_STAGING_DIR)
+    staging.mkdir(parents=True, exist_ok=True)
+
+    batch = UploadBatch.objects.create(
+        owner=upload.owner, kind=UploadBatch.Kind.ZIP,
+        original_filename=upload.original_filename,
+        target_folder=upload.target_folder,
+    )
+    destination = staging / f"batch-{batch.pk}.zip"
+    os.replace(path, destination)
+
+    batch.staged_path = str(destination)
+    batch.save(update_fields=["staged_path"])
+    upload.delete()
+
+    logger.info("chunked archive queued",
+                extra={"event": "ingest.chunked.queued", "batch_id": batch.pk})
+    return batch
 
 
 def abandon(upload: ChunkedUpload) -> None:

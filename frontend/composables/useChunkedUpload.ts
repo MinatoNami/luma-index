@@ -1,4 +1,4 @@
-import type { Book } from '~/composables/useLibrary'
+import type { Book, UploadBatch } from '~/composables/useLibrary'
 
 /**
  * Sending one large file in pieces, so a dropped connection is cheap.
@@ -61,11 +61,18 @@ export function useChunkedUpload() {
     return state.received
   }
 
+  /**
+   * Send one file and return what the server made of it.
+   *
+   * A PDF comes back as a book; a ZIP comes back as a batch the worker still
+   * has to extract, exactly as an inline upload of the same archive would.
+   */
   async function sendOne(
     file: File,
     folder: number | null,
     onProgress?: (p: ChunkProgress) => void,
-  ): Promise<{ book: Book; outcome: string }> {
+  ): Promise<{ outcome: 'imported' | 'duplicate' | 'queued'
+               book?: Book; batch?: UploadBatch }> {
     await ensureCsrf()
     const started = await begin(file, folder)
     const chunkSize = started.chunk_size || 8 * 1024 * 1024
@@ -109,7 +116,8 @@ export function useChunkedUpload() {
       report()
     }
 
-    return await api<{ book: Book; outcome: string }>(
+    return await api<{ outcome: 'imported' | 'duplicate' | 'queued'
+                       book?: Book; batch?: UploadBatch }>(
       `/library/uploads/chunked/${started.id}/complete/`, { method: 'POST' },
     )
   }

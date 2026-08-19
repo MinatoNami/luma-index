@@ -20,6 +20,7 @@ from library.chunked import CHUNK_SIZE, ChunkConflict, append, begin, finish, pu
 from library.models import Book, ChunkedUpload, Folder
 
 from .pdfs import make_pdf
+from .zips import library_zip
 
 
 def start(client, *, filename="Big.pdf", size=1000, folder=None):
@@ -89,6 +90,86 @@ def test_it_lands_in_the_folder_it_was_started_for(api, user):
 @pytest.mark.django_db
 def test_the_client_is_told_how_big_a_chunk_to_send(api, user):
     assert start(api, size=999).json()["chunk_size"] == CHUNK_SIZE
+
+
+# -- archives take the other road -------------------------------------------------- #
+
+@pytest.mark.django_db
+def test_a_zip_is_queued_for_the_worker_not_stored_as_a_book(api, user):
+    """A ZIP is extracted, not stored. Sending it through store_upload rejects
+    it for not being a PDF — after every byte has already arrived, which is
+    what chunking did to archives when it only knew about PDFs."""
+    from library.models import UploadBatch
+
+    archive = library_zip()
+    upload_id = start(api, filename="Books.zip", size=len(archive)).json()["id"]
+    send(api, upload_id, 0, archive)
+
+    done = complete(api, upload_id)
+
+    assert done.status_code == 201, done.json()
+    assert done.json()["outcome"] == "queued"
+    assert UploadBatch.objects.count() == 1
+    assert Book.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_the_queued_archive_is_the_one_that_was_uploaded(api, user):
+    from pathlib import Path
+
+    from library.models import UploadBatch
+
+    archive = library_zip()
+    upload_id = start(api, filename="Books.zip", size=len(archive)).json()["id"]
+    send(api, upload_id, 0, archive)
+    complete(api, upload_id)
+
+    batch = UploadBatch.objects.get()
+    assert batch.original_filename == "Books.zip"
+    assert Path(batch.staged_path).read_bytes() == archive
+
+
+@pytest.mark.django_db
+def test_a_chunked_archive_extracts_into_real_books(api, user):
+    """End to end: the worker picks the queued batch up and it becomes the same
+    library an inline ZIP upload would have produced."""
+    from library.models import UploadBatch
+    from library.services import process_zip_batch
+
+    archive = library_zip()
+    upload_id = start(api, filename="Books.zip", size=len(archive)).json()["id"]
+    send(api, upload_id, 0, archive)
+    complete(api, upload_id)
+
+    process_zip_batch(UploadBatch.objects.get())
+
+    assert Book.objects.count() > 0
+
+
+@pytest.mark.django_db
+def test_a_zip_lands_in_the_folder_it_was_started_for(api, user):
+    from library.models import UploadBatch
+
+    folder = Folder.objects.create(owner=user, name="Imports")
+    archive = library_zip()
+    upload_id = start(api, filename="Books.zip", size=len(archive),
+                      folder=folder.pk).json()["id"]
+    send(api, upload_id, 0, archive)
+    complete(api, upload_id)
+
+    assert UploadBatch.objects.get().target_folder_id == folder.pk
+
+
+@pytest.mark.django_db
+def test_the_extension_decides_regardless_of_case(api, user):
+    from library.models import UploadBatch
+
+    archive = library_zip()
+    upload_id = start(api, filename="SHOUTING.ZIP", size=len(archive)).json()["id"]
+    send(api, upload_id, 0, archive)
+
+    assert complete(api, upload_id).json()["outcome"] == "queued"
+    assert UploadBatch.objects.count() == 1
 
 
 # -- dropped connections --------------------------------------------------------- #
@@ -270,3 +351,38 @@ def test_finishing_an_upload_whose_staging_file_vanished_says_so(user):
 
 def test_chunk_conflict_carries_the_resume_point():
     assert ChunkConflict(4096).received == 4096
+
+
+@pytest.mark.django_db
+def test_a_quota_failure_at_the_end_keeps_the_bytes_for_a_retry(api, user, settings):
+    """Running out of room can come right — empty the trash and complete again.
+    Discarding several hundred megabytes the user already sent would turn a
+    recoverable problem into re-uploading the whole file."""
+    from pathlib import Path
+
+    from library.tests.test_quota import held
+
+    pdf = make_pdf()
+    upload_id = start(api, size=len(pdf)).json()["id"]
+    send(api, upload_id, 0, pdf)
+
+    # Fill the account only now, so `begin` let the upload through.
+    settings.DEFAULT_USER_QUOTA_BYTES = 1
+    held(user, "a" * 64, 4096)
+
+    response = complete(api, upload_id)
+
+    assert response.status_code == 507
+    staged = Path(ChunkedUpload.objects.get(pk=upload_id).staged_path)
+    assert staged.exists(), "the upload should survive to be retried"
+
+
+@pytest.mark.django_db
+def test_a_file_that_is_not_a_pdf_is_discarded_rather_than_kept(api, user):
+    """That one will fail again however many times it is retried."""
+    junk = b"nowhere near a pdf" * 20
+    upload_id = start(api, size=len(junk)).json()["id"]
+    send(api, upload_id, 0, junk)
+
+    assert complete(api, upload_id).status_code == 400
+    assert ChunkedUpload.objects.count() == 0
