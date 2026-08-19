@@ -107,6 +107,36 @@ function openHighlight(payload: { id: number; x: number; y: number }) {
  * quietly failed — clicking a highlight in the sidebar jumped to the page and
  * then did nothing at all.
  */
+/**
+ * The bar's secondary controls, for the phone-sized overflow menu.
+ *
+ * Nine buttons in a 375px bar is not a layout problem to solve with tighter
+ * gaps — three clusters run together into one undifferentiated row of glyphs,
+ * and two of the icons are near-identical grids. The panel toggles, the page
+ * mode and fullscreen move in here; back, find and the page arrows stay out.
+ */
+const barOverflow = computed(() => {
+  const items: { label: string; icon?: string; run: () => void }[] = []
+  if (outline.value.length) {
+    items.push({ label: sidebar.value ? 'Hide contents' : 'Contents', icon: 'list-view',
+                 run: () => { sidebar.value = !sidebar.value; thumbnails.value = false } })
+  }
+  items.push(
+    { label: thumbnails.value ? 'Hide page thumbnails' : 'Page thumbnails', icon: 'grid-view',
+      run: () => { thumbnails.value = !thumbnails.value; sidebar.value = false } },
+    { label: annotationsOpen.value ? 'Hide notes' : 'Bookmarks and notes', icon: 'inbox',
+      run: () => { annotationsOpen.value = !annotationsOpen.value } },
+    { label: currentBookmark.value ? 'Remove bookmark' : 'Bookmark this page', icon: 'star',
+      run: toggleBookmark },
+    { label: mode.value === 'continuous' ? 'Single page' : 'Continuous scroll', icon: 'file',
+      run: () => { mode.value = mode.value === 'continuous' ? 'single' : 'continuous' } },
+    { label: fit.value === 'fit-width' ? 'Fit page' : 'Fit width', icon: 'search',
+      run: () => { fit.value = fit.value === 'fit-width' ? 'fit-page' : 'fit-width' } },
+    { label: 'Fullscreen', icon: 'large-view', run: fullscreen },
+  )
+  return items
+})
+
 function openHighlightFromList(mark: Highlight, event: MouseEvent) {
   reader.value?.goTo(mark.page + 1)
   const row = (event.currentTarget as HTMLElement).getBoundingClientRect()
@@ -322,13 +352,13 @@ useHead({ title: computed(() => book.value ? `${book.value.title} — LumaIndex`
           <AppIcon name="chevron-right" :size="16" class="flip" />
           <span class="sr-only">Back to library</span>
         </NuxtLink>
-        <AppButton v-if="outline.length" variant="ghost" size="sm" icon-only icon="list-view"
+        <AppButton v-if="outline.length" variant="ghost" size="sm" icon-only icon="list-view" class="panel-toggle"
                    :title="sidebar ? 'Hide contents' : 'Show contents'"
                    @click="sidebar = !sidebar; thumbnails = false" />
-        <AppButton variant="ghost" size="sm" icon-only icon="grid-view"
+        <AppButton variant="ghost" size="sm" icon-only icon="grid-view" class="panel-toggle"
                    :title="thumbnails ? 'Hide page thumbnails' : 'Show page thumbnails'"
                    @click="thumbnails = !thumbnails; sidebar = false" />
-        <AppButton variant="ghost" size="sm" icon-only icon="inbox"
+        <AppButton variant="ghost" size="sm" icon-only icon="inbox" class="panel-toggle"
                    :title="annotationsOpen ? 'Hide notes' : 'Bookmarks, highlights and notes'"
                    @click="annotationsOpen = !annotationsOpen" />
         <h1>{{ book?.title }}</h1>
@@ -347,7 +377,7 @@ useHead({ title: computed(() => book.value ? `${book.value.title} — LumaIndex`
         <span class="pct tertiary">{{ percentage }}%</span>
         <AppButton variant="ghost" size="sm" icon-only
                    :icon="currentBookmark ? 'check' : 'file'"
-                   :class="{ bookmarked: currentBookmark }"
+                   class="bookmark-toggle" :class="{ bookmarked: currentBookmark }"
                    :title="currentBookmark ? 'Remove bookmark' : 'Bookmark this page'"
                    @click="toggleBookmark" />
       </div>
@@ -364,13 +394,14 @@ useHead({ title: computed(() => book.value ? `${book.value.title} — LumaIndex`
         </AppButton>
         <AppButton class="zoom" variant="ghost" size="sm" :title="'Zoom in'"
                    @click="zoomIn">+</AppButton>
-        <AppButton variant="ghost" size="sm"
+        <AppButton class="mode-toggle" variant="ghost" size="sm"
                    :title="mode === 'continuous' ? 'Single page' : 'Continuous scroll'"
                    @click="mode = mode === 'continuous' ? 'single' : 'continuous'">
           {{ mode === 'continuous' ? 'Scroll' : 'Page' }}
         </AppButton>
-        <AppButton variant="ghost" size="sm" icon-only icon="large-view" title="Fullscreen"
+        <AppButton variant="ghost" size="sm" icon-only icon="large-view" class="fullscreen" title="Fullscreen"
                    @click="fullscreen" />
+        <RowMenu class="bar-overflow" :actions="barOverflow" label="More reader controls" />
       </div>
     </header>
 
@@ -649,7 +680,12 @@ h1 { font-size: var(--text-base); font-weight: 500; margin: 0;
 .stage-loading { display: grid; place-items: center; height: 100%; }
 
 @media (max-width: 52rem) {
-  .right :deep(button:nth-child(-n+3)) { display: none; }
+  /* By name, not by position. This was `.right :deep(button:nth-child(-n+3))`,
+     and the descendant combinator meant it matched any button among the first
+     three children of *its own* parent — so it also hid the find button and,
+     once there was one, the overflow menu's trigger. Both vanished from the
+     bar with nothing to explain why. */
+  .zoom { display: none; }
   .outline { position: absolute; z-index: 10; height: calc(100% - 48px);
              box-shadow: var(--shadow-lg); }
 }
@@ -659,9 +695,17 @@ h1 { font-size: var(--text-base); font-weight: 500; margin: 0;
    gesture people already use on a phone, and the three buttons that replace it
    are the widest things here. The panels become overlays rather than columns,
    since a 16rem sidebar beside a 375px screen leaves nothing for the page. */
+/* Above this the menu is redundant — every control is already in the bar. */
+.bar-overflow { display: none; }
+
 @media (max-width: 30rem) {
-  .zoom { display: none; }
-  .title { display: none; }
+  .bar-overflow { display: block; }
+  /* Everything the menu now carries. Back, find and the page arrows stay in
+     the bar, which is five controls rather than nine. */
+  .zoom, .mode-toggle, .fullscreen,
+  .panel-toggle, .bookmark-toggle { display: none; }
+  /* The title stays: it is the one thing here that says which book this is,
+     and it already truncates. */
   /* Typing a page number and reading a percentage are the two things a phone
      can most afford to lose, and together they were 140px of a 375px bar —
      enough that the back button and the panel toggles were being crushed to

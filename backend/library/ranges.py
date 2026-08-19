@@ -83,9 +83,38 @@ def parse_range(header: str, size: int) -> tuple[int, int] | None | str:
 
 
 def serve_file(path: Path, *, content_type: str, filename: str,
-               range_header: str = "") -> HttpResponse:
-    """Serve a file, honouring a single byte range when one is asked for."""
+               range_header: str = "", etag: str = "",
+               if_none_match: str = "", if_range: str = "",
+               max_age: int = 0) -> HttpResponse:
+    """Serve a file, honouring a single byte range when one is asked for.
+
+    With an `etag`, the same file asked for twice costs a 304 instead of the
+    whole book. That matters more than it sounds: a reader re-opened over a
+    slow link was re-downloading every byte it had already seen, because
+    nothing here said the bytes were worth keeping.
+
+    Content addressing makes the tag free and exact — the storage key is the
+    SHA-256 of the contents, so it cannot say "unchanged" about a file that
+    changed. It is a strong validator for the same reason, which is what lets
+    `If-Range` resume a partial download rather than start again.
+    """
     size = path.stat().st_size
+
+    quoted = f'"{etag}"' if etag else ""
+    if quoted and _matches(if_none_match, quoted):
+        # 304 carries the validators and nothing else, by definition.
+        not_modified = HttpResponse(status=304)
+        not_modified["ETag"] = quoted
+        not_modified["Accept-Ranges"] = "bytes"
+        if max_age:
+            not_modified["Cache-Control"] = f"private, max-age={max_age}, must-revalidate"
+        return not_modified
+
+    # A range conditional on a version we no longer have has to be answered in
+    # full, or the client stitches new bytes onto an old prefix.
+    if range_header and if_range and quoted and not _matches(if_range, quoted):
+        range_header = ""
+
     requested = parse_range(range_header, size)
 
     if requested == "invalid":
@@ -106,8 +135,29 @@ def serve_file(path: Path, *, content_type: str, filename: str,
         response["Content-Length"] = str(length)
 
     response["Accept-Ranges"] = "bytes"
+    if quoted:
+        response["ETag"] = quoted
+    if max_age:
+        # `private` because Django authorised this and a shared cache must not
+        # hand it to the next reader. `must-revalidate` because a replaced
+        # source keeps the same URL, and a stale book is worse than a 304.
+        response["Cache-Control"] = f"private, max-age={max_age}, must-revalidate"
     # Quoted and escaped: a filename containing a quote would otherwise break
     # the header, and titles come from whatever the user uploaded.
     safe = filename.replace("\\", "").replace('"', "")
     response["Content-Disposition"] = f'inline; filename="{safe}"'
     return response
+
+
+def _matches(header: str, quoted_etag: str) -> bool:
+    """Whether an If-None-Match / If-Range header covers this entity tag."""
+    value = (header or "").strip()
+    if not value:
+        return False
+    if value == "*":
+        return True
+    # Weak comparison is not used here: ranges need a strong validator, and the
+    # tag is a content hash, so W/ prefixes are stripped only to be forgiving
+    # about what a client sends back.
+    candidates = [part.strip().removeprefix("W/") for part in value.split(",")]
+    return quoted_etag in candidates

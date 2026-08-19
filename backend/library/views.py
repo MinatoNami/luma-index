@@ -375,6 +375,13 @@ class BookContentView(OwnedMixin, APIView):
             content_type="application/pdf",
             filename=source.original_filename,
             range_header=request.headers.get("Range", ""),
+            # The storage key is the SHA-256 of the file, so it is an exact
+            # validator that costs nothing to produce. Re-opening a book then
+            # costs a 304 rather than the whole download.
+            etag=source.storage_key,
+            if_none_match=request.headers.get("If-None-Match", ""),
+            if_range=request.headers.get("If-Range", ""),
+            max_age=settings.BOOK_CACHE_SECONDS,
         )
         # X_FRAME_OPTIONS is DENY globally, which is right for the app but also
         # blocks our own reader from embedding this. Relaxed to same-origin on

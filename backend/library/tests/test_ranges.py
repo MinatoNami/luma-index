@@ -159,3 +159,60 @@ def test_ranges_still_require_authorization(client, book, other_user):
     response = intruder.get(reverse("library:book-content", args=[book.pk]),
                             headers={"range": "bytes=0-9"})
     assert response.status_code == 404
+
+
+# -- not downloading the same book twice --------------------------------------- #
+
+@pytest.mark.django_db
+def test_the_content_response_carries_the_files_own_hash(api, book):
+    """Content addressing makes an exact validator free: the storage key is the
+    SHA-256 of the bytes, so it cannot claim "unchanged" about a changed file."""
+    response = api.get(reverse("library:book-content", args=[book.pk]))
+
+    assert response["ETag"] == f'"{book.source.storage_key}"'
+    assert "max-age" in response["Cache-Control"]
+    assert "private" in response["Cache-Control"], "Django authorised this; no shared cache"
+
+
+@pytest.mark.django_db
+def test_a_second_request_costs_a_304_not_the_whole_book(api, book):
+    first = api.get(reverse("library:book-content", args=[book.pk]))
+
+    again = api.get(reverse("library:book-content", args=[book.pk]),
+                    headers={"if-none-match": first["ETag"]})
+
+    assert again.status_code == 304
+    assert again["ETag"] == first["ETag"]
+
+
+@pytest.mark.django_db
+def test_a_stale_validator_still_gets_the_file(api, book):
+    response = api.get(reverse("library:book-content", args=[book.pk]),
+                       headers={"if-none-match": '"not-the-current-hash"'})
+
+    assert response.status_code == 200
+    assert body_of(response).startswith(b"%PDF-")
+
+
+@pytest.mark.django_db
+def test_a_range_resumes_when_the_file_has_not_changed(api, book):
+    """A matching If-Range means the client may stitch these bytes onto what it
+    already has."""
+    etag = api.get(reverse("library:book-content", args=[book.pk]))["ETag"]
+
+    response = api.get(reverse("library:book-content", args=[book.pk]),
+                       headers={"range": "bytes=0-99", "if-range": etag})
+
+    assert response.status_code == 206
+    assert response["Content-Range"].startswith("bytes 0-99/")
+
+
+@pytest.mark.django_db
+def test_a_range_against_a_version_we_no_longer_have_is_answered_in_full(api, book):
+    """Otherwise the client stitches new bytes onto an old prefix and ends up
+    with a file that is neither."""
+    response = api.get(reverse("library:book-content", args=[book.pk]),
+                       headers={"range": "bytes=0-99", "if-range": '"an-older-hash"'})
+
+    assert response.status_code == 200
+    assert "Content-Range" not in response

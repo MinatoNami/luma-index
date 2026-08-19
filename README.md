@@ -142,6 +142,15 @@ id where a click position was expected, so `activeHighlightRecord` looked for
 rendered. Clicking a highlight in the sidebar jumped to the page and then did
 nothing at all.
 
+**A book is downloaded once.** `/content` answers with the file's storage key
+as its ETag, which content addressing makes both free and exact — the key is
+the SHA-256 of the bytes, so it cannot claim "unchanged" about a file that
+changed. Re-opening a book then costs a 304 instead of the whole download: 25 MB
+became 0 on the instance this was measured on. The same strong validator is
+what lets `If-Range` resume a partial download rather than start it again, and
+a range conditional on a version the server no longer has is answered in full
+rather than letting a client stitch new bytes onto an old prefix.
+
 **A large upload is sent in pieces**, in `library/chunked.py`, and what it
 becomes at the end depends on what it is: a PDF goes to `store_upload`, a ZIP
 is handed to the ingest worker as a batch. Sending an archive down the PDF path
@@ -356,7 +365,7 @@ Python.
 | 6 — Sharing | Built |
 | 7 — Hardening | Built |
 
-452 backend tests, including a 64-case object-level permission matrix, and 44
+457 backend tests, including a 64-case object-level permission matrix, and 44
 frontend tests over the logic that has actually broken here — selection
 ranges, cover loading states, sort labels.
 

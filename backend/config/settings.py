@@ -345,6 +345,13 @@ DEFAULT_USER_QUOTA_BYTES = env_int("LUMA_DEFAULT_USER_QUOTA_BYTES", 0)
 # place quota goes to hide. See library/retention.py.
 TRASH_RETENTION_DAYS = env_int("LUMA_TRASH_RETENTION_DAYS", 0)
 
+# How long a browser may reuse a downloaded book before checking again. The
+# check itself is a 304 against the file's own hash, so this is only about how
+# often that round trip happens — the bytes are reused either way. An hour
+# keeps a reader re-opening the same book instant without letting a replaced
+# source go unnoticed for long.
+BOOK_CACHE_SECONDS = env_int("LUMA_BOOK_CACHE_SECONDS", 3600)
+
 # Admin static files only. Never point this at LIBRARY_DIR — stored PDFs must
 # be served through the authorization boundary, never as static content.
 STATIC_URL = "/static/"
