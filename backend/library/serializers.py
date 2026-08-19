@@ -17,6 +17,7 @@ from .models import (
     UploadBatch,
 )
 from .previews import collect_preview_book_ids
+from .retention import expires_at
 
 
 class FolderListSerializer(serializers.ListSerializer):
@@ -40,16 +41,17 @@ class FolderSerializer(serializers.ModelSerializer):
     folder_count = serializers.SerializerMethodField()
     item_count = serializers.SerializerMethodField()
     preview_book_ids = serializers.SerializerMethodField()
+    expires_at = serializers.SerializerMethodField()
 
     class Meta:
         model = Folder
         list_serializer_class = FolderListSerializer
         fields = ("id", "name", "parent", "path", "has_children", "book_count",
                   "folder_count", "item_count", "preview_book_ids", "deleted_at",
-                  "created_at", "updated_at")
+                  "expires_at", "created_at", "updated_at")
         read_only_fields = ("id", "path", "has_children", "book_count", "folder_count",
-                            "item_count", "preview_book_ids", "deleted_at", "created_at",
-                            "updated_at")
+                            "item_count", "preview_book_ids", "deleted_at", "expires_at",
+                            "created_at", "updated_at")
 
     def get_has_children(self, obj) -> bool:
         return obj.children.filter(deleted_at__isnull=True).exists()
@@ -67,6 +69,14 @@ class FolderSerializer(serializers.ModelSerializer):
         books alone reported "0 items" for a folder full of books.
         """
         return self.get_folder_count(obj) + self.get_book_count(obj)
+
+    def get_expires_at(self, obj):
+        """When the trash will destroy this, or null if never.
+
+        Null covers both "not in the trash" and "retention is off", which are
+        the same answer to the only question the interface asks.
+        """
+        return expires_at(obj.deleted_at)
 
     def get_preview_book_ids(self, obj) -> list[int]:
         """Books whose covers stand in for this folder (see previews.py).
@@ -176,15 +186,20 @@ class BookSerializer(serializers.ModelSerializer):
     path = serializers.CharField(read_only=True)
     progress = serializers.SerializerMethodField()
     is_favourite = serializers.SerializerMethodField()
+    expires_at = serializers.SerializerMethodField()
 
     class Meta:
         model = Book
         fields = ("id", "title", "folder", "path", "page_count", "has_text_layer",
                   "visibility", "thumbnail_path", "source", "progress", "is_favourite",
-                  "deleted_at", "created_at", "updated_at")
+                  "deleted_at", "expires_at", "created_at", "updated_at")
         read_only_fields = ("id", "path", "page_count", "has_text_layer", "thumbnail_path",
-                            "source", "progress", "is_favourite", "deleted_at",
+                            "source", "progress", "is_favourite", "deleted_at", "expires_at",
                             "created_at", "updated_at")
+
+    def get_expires_at(self, obj):
+        """When the trash will destroy this, or null if never."""
+        return expires_at(obj.deleted_at)
 
     @extend_schema_field(serializers.BooleanField())
     def get_is_favourite(self, obj) -> bool:

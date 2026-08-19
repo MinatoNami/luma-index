@@ -21,6 +21,7 @@ const PATHS: Record<string, string> = {
   download: 'M12 4v12m0 0 4.5-4.5M12 16l-4.5-4.5M4 17v1.5A2.5 2.5 0 0 0 6.5 21h11a2.5 2.5 0 0 0 2.5-2.5V17',
   pencil: 'M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17Zm11-13 3 3',
   'arrow-up': 'M12 20V5m0 0-6 6m6-6 6 6',
+  'arrow-down': 'M12 4v15m0 0 6-6m-6 6-6-6',
   'chevron-right': 'M9 6l6 6-6 6',
   'list-view': 'M4 6h16M4 12h16M4 18h16',
   'grid-view': 'M4 5h6v6H4Zm10 0h6v6h-6ZM4 13h6v6H4Zm10 0h6v6h-6Z',

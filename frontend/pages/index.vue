@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { formatBytes, type Book, type Folder, type UploadBatch } from '~/composables/useLibrary'
 import type { ViewMode } from '~/components/ViewToggle.vue'
+import type { SortKey } from '~/components/SortMenu.vue'
 
 const library = useLibrary()
 const { user, logout } = useAuth()
@@ -22,6 +23,20 @@ const batches = ref<UploadBatch[]>([])
 // Remembered locally. PRD §24 wants view preferences on UserSettings so they
 // follow a reader between devices; that lands with the reader.
 const view = useState<ViewMode>('library-view', () => 'list')
+
+// Kept alongside the layout: an order you chose should survive walking into a
+// folder and back out again.
+const sortKey = useState<SortKey>('library-sort', () => 'name')
+const sortDesc = useState<boolean>('library-sort-desc', () => false)
+
+// "Type" is not a column the database can order by — folders and books come
+// back as separate lists — so it asks for plain alphabetical and decides which
+// block is drawn first.
+const apiSort = computed(() => {
+  if (sortKey.value === 'type') return 'name'
+  return sortDesc.value ? `-${sortKey.value}` : sortKey.value
+})
+const filesFirst = computed(() => sortKey.value === 'type' && sortDesc.value)
 
 const dialog = ref<{
   title: string; label?: string; value?: string; confirmLabel?: string
@@ -185,8 +200,10 @@ const { data, pending, error: loadError, refresh: reload } = await useAsyncData(
     // Folders only make sense while browsing the tree; a view or a collection
     // is a flat list of books.
     const browsing = view === 'files' && collection === null
+    params.sort = apiSort.value
     const [folderList, bookList] = await Promise.all([
-      browsing ? library.listFolders(currentId.value) : Promise.resolve([]),
+      browsing ? library.listFolders(currentId.value, { sort: apiSort.value })
+               : Promise.resolve([]),
       browsing
         ? library.listBooks(currentId.value, params)
         : library.listBooks(null, params).then(books => books),
@@ -196,7 +213,10 @@ const { data, pending, error: loadError, refresh: reload } = await useAsyncData(
       : null
     return { folders: folderList, books: bookList, detail }
   },
-  { watch: [currentId, search, activeView, activeCollection], default: () => ({ folders: [], books: [], detail: null }) },
+  {
+    watch: [currentId, search, activeView, activeCollection, apiSort],
+    default: () => ({ folders: [], books: [], detail: null }),
+  },
 )
 
 // Surfaced rather than swallowed: a failed fetch used to render as an empty
@@ -222,10 +242,14 @@ const loading = computed(() => pending.value && !data.value?.folders.length
 
 // Folders before books, matching the order they are drawn, so a shift-click
 // range covers exactly the rows between the two that were clicked.
-const selectable = computed(() => [
-  ...folders.value.map(f => ({ kind: 'folder' as const, id: f.id })),
-  ...books.value.map(b => ({ kind: 'book' as const, id: b.id })),
-])
+const selectable = computed(() => {
+  const folderRows = folders.value.map(f => ({ kind: 'folder' as const, id: f.id }))
+  const bookRows = books.value.map(b => ({ kind: 'book' as const, id: b.id }))
+  // Follows the drawn order, including when "Type / files first" flips the two
+  // blocks — a shift-click range measured against the other order would select
+  // rows the user cannot see between the two they clicked.
+  return filesFirst.value ? [...bookRows, ...folderRows] : [...folderRows, ...bookRows]
+})
 const selection = useSelection(selectable)
 const bulkMoving = ref(false)
 const bulkCollecting = ref(false)
@@ -556,6 +580,7 @@ function itemLabel(folder: Folder): string {
                  aria-label="Search titles" />
         </div>
         <div class="spacer" />
+        <SortMenu v-model="sortKey" v-model:descending="sortDesc" />
         <ViewToggle v-model="view" />
         <AppButton icon="folder-plus" :disabled="busy" @click="newFolder">New folder</AppButton>
         <AppButton variant="primary" icon="upload" :loading="busy"
@@ -633,6 +658,7 @@ function itemLabel(folder: Folder): string {
           <span>Name</span><span>Size</span><span>Pages</span><span />
         </div>
         <div v-for="folder in folders" :key="`f${folder.id}`" class="row"
+             :style="{ order: filesFirst ? 2 : 1 }"
              :class="{ 'drop-into': dropTarget === folder.id,
                        'is-selected': selection.has('folder', folder.id) }" draggable="true"
              @dragstart="onRowDragStart($event, 'folder', folder.id)" @dragend="onRowDragEnd"
@@ -653,6 +679,7 @@ function itemLabel(folder: Folder): string {
           <RowMenu :actions="folderActions(folder)" :label="`Actions for ${folder.name}`" />
         </div>
         <div v-for="book in books" :key="`b${book.id}`" class="row"
+             :style="{ order: filesFirst ? 1 : 2 }"
              :class="{ 'is-selected': selection.has('book', book.id) }" draggable="true"
              @dragstart="onRowDragStart($event, 'book', book.id)" @dragend="onRowDragEnd">
           <span class="pick">
@@ -686,6 +713,7 @@ function itemLabel(folder: Folder): string {
       <div v-else :class="['cards', view]">
         <div v-for="folder in folders" :key="`f${folder.id}`"
              class="card folder-card panel"
+             :style="{ order: filesFirst ? 2 : 1 }"
              :class="{ 'drop-into': dropTarget === folder.id,
                        'is-selected': selection.has('folder', folder.id) }" draggable="true"
              @dragstart="onRowDragStart($event, 'folder', folder.id)" @dragend="onRowDragEnd"
@@ -707,6 +735,7 @@ function itemLabel(folder: Folder): string {
                    :label="`Actions for ${folder.name}`" />
         </div>
         <div v-for="book in books" :key="`b${book.id}`" class="card panel"
+             :style="{ order: filesFirst ? 1 : 2 }"
              :class="{ 'is-selected': selection.has('book', book.id) }" draggable="true"
              @dragstart="onRowDragStart($event, 'book', book.id)" @dragend="onRowDragEnd">
           <label class="card-pick" :class="{ on: selection.has('book', book.id) }" @click.stop>
@@ -843,7 +872,9 @@ function itemLabel(folder: Folder): string {
 .batch-body span { font-size: var(--text-sm); }
 
 /* -- list -------------------------------------------------------------- */
-.listing { overflow: hidden; }
+/* A flex column purely so `order` works: the markup keeps folders first, and
+   the "files first" sort flips the two blocks without duplicating either. */
+.listing { display: flex; flex-direction: column; overflow: hidden; }
 .row {
   display: grid;
   grid-template-columns: 30px minmax(0, 1fr) 8rem 5rem 32px 40px;

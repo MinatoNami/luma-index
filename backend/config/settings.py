@@ -312,6 +312,13 @@ MIN_FREE_DISK_BYTES = env_int("LUMA_MIN_FREE_DISK_BYTES", 2 * 1024**3)
 # admin; see library/quota.py for what counts towards it.
 DEFAULT_USER_QUOTA_BYTES = env_int("LUMA_DEFAULT_USER_QUOTA_BYTES", 0)
 
+# How many days trashed items are kept before the worker destroys them.
+# 0 — the default — means never, because this is the only place that deletes a
+# file nobody asked it to delete, and storage here is canonical: the PDF in the
+# trash may be its owner's only copy. Turn it on and the trash stops being a
+# place quota goes to hide. See library/retention.py.
+TRASH_RETENTION_DAYS = env_int("LUMA_TRASH_RETENTION_DAYS", 0)
+
 # Admin static files only. Never point this at LIBRARY_DIR — stored PDFs must
 # be served through the authorization boundary, never as static content.
 STATIC_URL = "/static/"

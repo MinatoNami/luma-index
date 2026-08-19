@@ -228,5 +228,9 @@ def test_a_users_library_listing_never_includes_another_users_books(owner, stran
 @pytest.mark.django_db
 def test_trash_only_ever_shows_your_own(owner, stranger, books):
     books["private"].trash()
-    assert signed_in(stranger).get(reverse("library:trash")).json() == {
-        "folders": [], "books": []}
+
+    body = signed_in(stranger).get(reverse("library:trash")).json()
+
+    # The lists, not the whole envelope: the trash also reports the instance's
+    # retention policy, which is not somebody else's data.
+    assert (body["folders"], body["books"]) == ([], [])

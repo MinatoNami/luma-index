@@ -10,6 +10,8 @@ export interface Folder {
   /** Books whose covers stand in for this folder — see FolderCover. */
   preview_book_ids: number[]
   deleted_at: string | null
+  /** When the trash will destroy this, or null if never. */
+  expires_at: string | null
 }
 
 export interface BookSource {
@@ -30,7 +32,16 @@ export interface Book {
   visibility: 'private' | 'shared'
   thumbnail_path: string
   source: BookSource | null
+  progress: {
+    page: number
+    page_fraction: number
+    percentage: number
+    last_opened_at: string | null
+  } | null
+  is_favourite: boolean
   deleted_at: string | null
+  /** When the trash will destroy this, or null if never. */
+  expires_at: string | null
 }
 
 export interface UploadBatch {
@@ -53,8 +64,10 @@ export function useLibrary() {
 
   const folderParam = (id: number | null) => (id === null ? 'root' : String(id))
 
-  async function listFolders(parent: number | null) {
-    return await api<Folder[]>('/library/folders/', { params: { parent: folderParam(parent) } })
+  async function listFolders(parent: number | null, options: { sort?: string } = {}) {
+    return await api<Folder[]>('/library/folders/', {
+      params: { parent: folderParam(parent), ...options },
+    })
   }
 
   async function listBooks(parent: number | null, options: { search?: string; sort?: string } = {}) {
@@ -109,8 +122,13 @@ export function useLibrary() {
     await api(`/library/${kind}s/${id}/?permanent=true`, { method: 'DELETE' })
   }
 
-  async function listTrash() {
-    return await api<{ folders: Folder[]; books: Book[] }>('/library/trash/')
+  async function listTrash(options: { sort?: string } = {}) {
+    return await api<{
+      folders: Folder[]
+      books: Book[]
+      /** Days before the trash empties itself, or null when it never does. */
+      retention_days: number | null
+    }>('/library/trash/', { params: { ...options } })
   }
 
   async function upload(files: File[], folder: number | null): Promise<UploadResult> {

@@ -24,7 +24,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from . import bulk
+from . import bulk, sorting
 from .lifecycle import readers_of, set_visibility
 from .models import (
     Book,
@@ -42,6 +42,7 @@ from .outline import outline_for
 from .permissions import can_modify, can_read, readable_books
 from .quota import QuotaExceeded, ensure_room, limit_for, usage_for
 from .ranges import serve_file
+from .retention import retention_days
 from .serializers import (
     BookmarkSerializer,
     BookSerializer,
@@ -148,6 +149,7 @@ class FolderListView(OwnedMixin, APIView):
             raw = request.GET["parent"]
             queryset = (queryset.filter(parent__isnull=True) if raw in ("", "root", "null")
                         else queryset.filter(parent_id=raw))
+        queryset = sorting.apply(queryset, request.GET.get("sort"), sorting.FOLDER_FIELDS)
         return Response(FolderSerializer(queryset, many=True, context={"request": request}).data)
 
     @extend_schema(summary="Create a folder", request=FolderSerializer,
@@ -278,11 +280,7 @@ class BookListView(OwnedMixin, APIView):
         if search := request.GET.get("search", "").strip():
             queryset = queryset.filter(title__icontains=search)
 
-        sort = request.GET.get("sort", "title")
-        allowed = {"title": "title", "-title": "-title", "added": "created_at",
-                   "-added": "-created_at", "size": "source__file_size",
-                   "-size": "-source__file_size"}
-        queryset = queryset.order_by(allowed.get(sort, "title"))
+        queryset = sorting.apply(queryset, request.GET.get("sort"), sorting.BOOK_FIELDS)
 
         return Response(BookSerializer(queryset, many=True, context={"request": request}).data)
 
@@ -568,11 +566,16 @@ class TrashView(OwnedMixin, APIView):
     @extend_schema(summary="Trashed folders and books",
                    responses={200: OpenApiResponse(description="Trash contents")})
     def get(self, request):
-        folders = self.folders().trashed()
-        books = self.books().trashed()
+        # Most recently thrown away first: the thing you are looking for in a
+        # trash is almost always the thing you just deleted by mistake.
+        sort = request.GET.get("sort", "-trashed")
+        folders = sorting.apply(self.folders().trashed(), sort, sorting.FOLDER_FIELDS)
+        books = sorting.apply(self.books().trashed(), sort, sorting.BOOK_FIELDS)
         return Response({
             "folders": FolderSerializer(folders, many=True, context={"request": request}).data,
             "books": BookSerializer(books, many=True, context={"request": request}).data,
+            # Null when retention is off, which is the default.
+            "retention_days": retention_days() or None,
         })
 
 

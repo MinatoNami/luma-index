@@ -23,6 +23,7 @@ from django.db import connection as db_connection
 
 from common.db import advisory_lock
 from library.models import UploadBatch
+from library.retention import purge_expired, retention_days
 from library.services import process_pending_documents, process_zip_batch
 
 logger = logging.getLogger("lumaindex.ingest.worker")
@@ -32,6 +33,10 @@ HEARTBEAT_PATH = Path(os.environ.get("LUMA_WORKER_HEARTBEAT",
 
 POLL_SECONDS = 5
 DOCUMENT_PASSES = 4
+
+# Retention is measured in days, so sweeping more than hourly buys nothing and
+# costs a query on every one of the worker's five-second passes.
+TRASH_SWEEP_SECONDS = 3600
 
 
 class Command(BaseCommand):
@@ -54,6 +59,9 @@ class Command(BaseCommand):
         signal.signal(signal.SIGINT, stop)
 
         self.beat()
+        # Zero, not "now", so a worker that has just started sweeps immediately:
+        # after a restart, the thing most likely to be overdue is the trash.
+        self._last_sweep = 0.0
         logger.info("ingest worker started", extra={"event": "ingest.worker.started"})
 
         while self._running:
@@ -95,6 +103,7 @@ class Command(BaseCommand):
 
     def pass_once(self) -> bool:
         worked = self.process_batches()
+        self.sweep_trash()
         for _ in range(DOCUMENT_PASSES):
             if not self._running:
                 break
@@ -106,6 +115,24 @@ class Command(BaseCommand):
             if not result["remaining"]:
                 break
         return worked
+
+    def sweep_trash(self) -> None:
+        """Destroy trashed items past their retention, at most hourly.
+
+        Under an advisory lock like everything else here, so a second worker —
+        or somebody running `manage.py empty_trash` — cannot sweep the same
+        rows at the same time.
+        """
+        if not retention_days():
+            return
+        if time.monotonic() - self._last_sweep < TRASH_SWEEP_SECONDS:
+            return
+        self._last_sweep = time.monotonic()
+
+        with advisory_lock("lumaindex.trash_sweep", blocking=False) as acquired:
+            if not acquired:
+                return
+            purge_expired()
 
     def process_batches(self) -> bool:
         worked = False

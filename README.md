@@ -24,7 +24,7 @@ Caddy and a background worker — reachable over
 | | |
 | --- | --- |
 | **Upload** | Drag PDFs in from your computer — onto the page, or straight onto a folder. A ZIP has its folder structure rebuilt on import. Identical files are stored once. |
-| **Organise** | Folders you create, rename, and delete. Drag items onto a folder to move them, or use the picker on any row. Tick several — shift-click for a run — and move, trash, favourite or collect them in one go. Each folder wears a mosaic of the covers inside it. Deleting goes to a trash you can restore from. |
+| **Organise** | Folders you create, rename, and delete. Drag items onto a folder to move them, or use the picker on any row. Tick several — shift-click for a run — and move, trash, favourite or collect them in one go. Each folder wears a mosaic of the covers inside it. Sort either by name, date added, last modified, size, or type. Deleting goes to a trash you can restore from — sortable too, including by when you deleted it. |
 | **Read** | A PDF.js reader: continuous scroll or single page, zoom, text selection, search within the book, an outline sidebar, page thumbnails. |
 | **Resume** | Your place is saved as you read and picked up on any other device. |
 | **Annotate** | Bookmarks, highlighted passages in four colours, notes on a highlight, and page notes for scans with no text layer. |
@@ -134,6 +134,25 @@ Three shapes carry the design:
 Deleting is a **trash**. An uploaded PDF may be the only copy its owner has, so
 deletion is reversible and destroying it is a separate, explicit step.
 
+**The trash can empty itself**, and does not unless told to. `TRASH_RETENTION_DAYS`
+is 0 by default, because this is the only code that destroys a file nobody
+asked it to destroy and storage here is canonical — the PDF in the trash may be
+its owner's only copy, and the two-step delete exists to protect exactly that.
+Turned on, it stops the trash being where quota goes to hide. The sweep runs in
+the ingest worker, hourly and bounded, and refuses to delete a folder that
+still holds a live item: `Folder.trash()` cannot leave one behind, but a cascade
+delete does not check and the cost of being wrong is somebody's only copy.
+`manage.py empty_trash --dry-run` shows what would go.
+
+**Sorting is one vocabulary across three listings** (`library/sorting.py`).
+A folder has a `name`, a book has a `title`, and only one of them has a size,
+so left alone each listing would grow its own words for the same idea.
+`?sort=name` means the same thing everywhere, and asking folders for a column
+they do not have falls back to plain alphabetical rather than to a direction
+nobody chose. Ordering by type is not in there: folders and books come back as
+separate lists, so "files first" is a question about which block to draw first,
+not one for the database.
+
 **A selection is acted on in one request**, through `library/bulk.py`. Every
 operation there is partial by design: an item that cannot be acted on is
 skipped with a reason and the rest still go through, so moving forty books into
@@ -215,6 +234,13 @@ browsers have been exercised in anger. PRD §39 treats tablet as a primary
 reading target; in practice it is not one for this instance, so tablet-specific
 testing is not tracked as outstanding work.
 
+Trash retention is off on this instance, so its sweep has never destroyed
+anything here. The sweep itself, its refusal to touch a folder holding live
+items, and the worker running it on a pass are covered by tests; what has not
+been watched is the hourly cadence over a long-running worker, since the tests
+drive a single pass. `manage.py empty_trash --dry-run` has been run against the
+real trash and reported what it would do.
+
 The reason they could not be checked from the development tooling is worth
 keeping: the preview pane cannot render PDFs at all. PDF.js drives its render
 loop with `requestAnimationFrame`, and that pane runs with
@@ -228,7 +254,6 @@ has to be checked in a real browser.**
 | --- | --- |
 | **Real email delivery** | Password reset works, but the console backend prints reset links into the log. Point `LUMA_EMAIL_BACKEND` at an SMTP relay before a second person has an account. |
 | **Off-box backups** | `deploy.sh backup` writes to the host it is backing up. The restore procedure itself has been rehearsed — see [the drill](docs/deployment.md#the-restore-drill) — but copying dumps and the `library` volume elsewhere is still manual. |
-| **Emptying the trash automatically** | Trashed items stay until deleted by hand, and they count towards a storage quota the whole time. |
 | **Sharing with named people or groups** | §16 keeps this to private or shared-with-everyone-signed-in. The richer model is §43 future work and would change `library/permissions.py` alone. |
 
 ### Open question
@@ -251,7 +276,7 @@ tuning question now rather than a design one.
 | 6 — Sharing | Built |
 | 7 — Hardening | Built |
 
-377 backend tests, including a 64-case object-level permission matrix.
+412 backend tests, including a 64-case object-level permission matrix.
 
 ---
 
