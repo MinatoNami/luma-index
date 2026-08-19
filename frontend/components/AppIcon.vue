@@ -32,6 +32,9 @@ const PATHS: Record<string, string> = {
   close: 'M6 6l12 12M18 6 6 18',
   warning: 'M12 8.5v4.5m0 3h.01M10.3 3.9 2.6 17.4A2 2 0 0 0 4.3 20.4h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z',
   settings: 'M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-2.9 1.2V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 7 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 2.6 14H2.5a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 7a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 10 2.6V2.5a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 2.9 1.2l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 21.4 10h.1a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.53 1Z',
+  star: 'M12 3.6l2.6 5.3 5.8.85-4.2 4.1 1 5.75L12 16.9l-5.2 2.7 1-5.75-4.2-4.1 5.8-.85z',
+  'star-filled': 'M12 3.6l2.6 5.3 5.8.85-4.2 4.1 1 5.75L12 16.9l-5.2 2.7 1-5.75-4.2-4.1 5.8-.85z',
+  collection: 'M4 7.5A1.5 1.5 0 0 1 5.5 6h13A1.5 1.5 0 0 1 20 7.5v11a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5Z M7 6V4.5h10V6 M8 11h8 M8 15h5',
   inbox: 'M4 13h4l1.5 3h5L16 13h4M4 13 6.8 5.7A2 2 0 0 1 8.7 4.4h6.6a2 2 0 0 1 1.9 1.3L20 13v5.5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z',
 }
 
@@ -40,7 +43,8 @@ const segments = computed(() => (PATHS[props.name] ?? '').split(' M').map((d, i)
 
 <template>
   <svg class="icon" :width="props.size" :height="props.size" viewBox="0 0 24 24"
-       fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"
+       :fill="props.name === 'star-filled' ? 'currentColor' : 'none'"
+       stroke="currentColor" stroke-width="1.6" stroke-linecap="round"
        stroke-linejoin="round" aria-hidden="true" focusable="false">
     <path v-for="(d, i) in segments" :key="i" :d="d" />
   </svg>

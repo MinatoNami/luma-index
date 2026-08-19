@@ -36,6 +36,40 @@ const moving = ref<{ kind: 'folder' | 'book'; id: number; name: string
                      currentFolder: number | null } | null>(null)
 const moveError = ref('')
 
+const collections = useCollections()
+const inCollection = ref<{ id: number; title: string } | null>(null)
+
+// The virtual views from §12. A view and a folder are mutually exclusive:
+// "favourites" is not a place in the tree.
+type LibraryView = 'files' | 'favourites' | 'recent' | 'unsorted'
+const activeView = computed<LibraryView>(() => {
+  const v = route.query.view
+  return v === 'favourites' || v === 'recent' || v === 'unsorted' ? v : 'files'
+})
+const activeCollection = computed(() =>
+  route.query.collection ? Number(route.query.collection) : null)
+
+const VIEWS: { value: LibraryView; label: string; icon: string }[] = [
+  { value: 'files', label: 'Files', icon: 'folder' },
+  { value: 'favourites', label: 'Favourites', icon: 'star' },
+  { value: 'recent', label: 'Recent', icon: 'inbox' },
+  { value: 'unsorted', label: 'Unsorted', icon: 'file' },
+]
+
+function selectView(view: LibraryView) {
+  router.push({ query: view === 'files' ? {} : { view } })
+}
+
+async function toggleFavourite(book: Book) {
+  const next = !book.is_favourite
+  try {
+    await collections.setFavourite(book.id, next)
+    await load({ quiet: true })
+  } catch {
+    error.value = 'Could not update that favourite.'
+  }
+}
+
 // -- drag and drop ---------------------------------------------------------- //
 // Two different drops land on a folder: files from the computer, which upload
 // into it, and a row from the page, which moves. They are told apart by whether
@@ -140,16 +174,28 @@ watch(view, value => import.meta.client && localStorage.setItem('lumaindex-view'
 const { data, pending, error: loadError, refresh: reload } = await useAsyncData(
   'library-folder',
   async () => {
+    const view = activeView.value
+    const collection = activeCollection.value
+    const params: Record<string, string> = {}
+    if (search.value) params.search = search.value
+    if (view !== 'files') params.view = view
+    if (collection !== null) params.collection = String(collection)
+
+    // Folders only make sense while browsing the tree; a view or a collection
+    // is a flat list of books.
+    const browsing = view === 'files' && collection === null
     const [folderList, bookList] = await Promise.all([
-      library.listFolders(currentId.value),
-      library.listBooks(currentId.value, search.value ? { search: search.value } : {}),
+      browsing ? library.listFolders(currentId.value) : Promise.resolve([]),
+      browsing
+        ? library.listBooks(currentId.value, params)
+        : library.listBooks(null, params).then(books => books),
     ])
-    const detail = currentId.value === null
-      ? null
-      : await library.folderDetail(currentId.value)
+    const detail = browsing && currentId.value !== null
+      ? await library.folderDetail(currentId.value)
+      : null
     return { folders: folderList, books: bookList, detail }
   },
-  { watch: [currentId, search], default: () => ({ folders: [], books: [], detail: null }) },
+  { watch: [currentId, search, activeView, activeCollection], default: () => ({ folders: [], books: [], detail: null }) },
 )
 
 // Surfaced rather than swallowed: a failed fetch used to render as an empty
@@ -350,6 +396,8 @@ function bookActions(book: Book) {
     { label: 'Open', icon: 'file', run: () => navigateTo(`/books/${book.id}`) },
     { label: 'Download', icon: 'download',
       run: () => window.open(`/api/library/books/${book.id}/content`, '_blank') },
+    { label: 'Add to collection…', icon: 'collection',
+      run: () => { inCollection.value = { id: book.id, title: book.title } } },
     { label: 'Move to…', icon: 'folder', run: () => startMove(book, 'book') },
     ...(currentId.value !== null
       ? [{ label: 'Move up one level', icon: 'arrow-up', run: () => moveUp(book, 'book') }]
@@ -403,6 +451,18 @@ function itemLabel(folder: Folder): string {
           <span class="crumb current" aria-current="page">{{ currentFolder.name }}</span>
         </template>
       </nav>
+
+      <div class="views" role="tablist" aria-label="Library views">
+        <button v-for="view in VIEWS" :key="view.value" type="button" role="tab"
+                :class="['chip', { active: activeView === view.value && !activeCollection }]"
+                :aria-selected="activeView === view.value && !activeCollection"
+                @click="selectView(view.value)">
+          <AppIcon :name="view.icon" :size="15" /> {{ view.label }}
+        </button>
+        <NuxtLink class="chip" to="/collections">
+          <AppIcon name="collection" :size="15" /> Collections
+        </NuxtLink>
+      </div>
 
       <div class="toolbar">
         <div class="search">
@@ -492,6 +552,13 @@ function itemLabel(folder: Folder): string {
           </NuxtLink>
           <span class="cell tertiary">{{ book.source ? formatBytes(book.source.file_size) : '—' }}</span>
           <span class="cell tertiary">{{ book.page_count ?? '…' }}</span>
+          <button class="star" type="button"
+                  :class="{ on: book.is_favourite }"
+                  :title="book.is_favourite ? 'Remove from favourites' : 'Add to favourites'"
+                  :aria-pressed="book.is_favourite"
+                  @click.stop.prevent="toggleFavourite(book)">
+            <AppIcon :name="book.is_favourite ? 'star-filled' : 'star'" :size="16" />
+          </button>
           <RowMenu :actions="bookActions(book)" :label="`Actions for ${book.title}`" />
         </div>
       </div>
@@ -522,6 +589,12 @@ function itemLabel(folder: Folder): string {
               <template v-if="book.source"> · {{ formatBytes(book.source.file_size) }}</template>
             </span>
           </NuxtLink>
+          <button class="star card-star" type="button" :class="{ on: book.is_favourite }"
+                  :title="book.is_favourite ? 'Remove from favourites' : 'Add to favourites'"
+                  :aria-pressed="book.is_favourite"
+                  @click.stop.prevent="toggleFavourite(book)">
+            <AppIcon :name="book.is_favourite ? 'star-filled' : 'star'" :size="16" />
+          </button>
           <RowMenu class="card-menu" :actions="bookActions(book)"
                    :label="`Actions for ${book.title}`" />
         </div>
@@ -538,6 +611,11 @@ function itemLabel(folder: Folder): string {
         <span class="tertiary">PDFs, or a ZIP of them</span>
       </div>
     </div>
+
+    <CollectionPicker v-if="inCollection" :book-id="inCollection.id"
+                      :book-title="inCollection.title"
+                      @cancel="inCollection = null"
+                      @done="inCollection = null; load({ quiet: true })" />
 
     <FolderPicker v-if="moving" :title="`Move “${moving.name}”`"
                   :exclude-folder-id="moving.kind === 'folder' ? moving.id : null"
@@ -585,6 +663,26 @@ function itemLabel(folder: Folder): string {
 .crumb.current { color: var(--text); font-weight: 500; cursor: default; }
 .sep { color: var(--text-tertiary); }
 
+.views { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.chip {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  padding: var(--space-1) var(--space-3); min-height: 32px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-full); color: var(--text-secondary);
+  font-size: var(--text-sm); text-decoration: none; cursor: pointer;
+}
+.chip:hover { background: var(--surface-hover); color: var(--text); }
+.chip.active { background: var(--accent-soft); border-color: var(--accent);
+               color: var(--accent-text); }
+
+.star { display: grid; place-items: center; width: 32px; height: 32px;
+        background: none; border: 0; border-radius: var(--radius-sm);
+        color: var(--text-tertiary); cursor: pointer; }
+.star:hover { background: var(--surface-hover); color: var(--text); }
+.star.on { color: var(--warning); }
+.card-star { position: absolute; top: var(--space-2); left: var(--space-2);
+             background: var(--surface); border-radius: var(--radius-sm); }
+
 .toolbar { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; }
 .search { position: relative; display: flex; align-items: center; width: min(20rem, 100%); }
 .search > svg { position: absolute; left: var(--space-3); color: var(--text-tertiary); }
@@ -602,7 +700,7 @@ function itemLabel(folder: Folder): string {
 .listing { overflow: hidden; }
 .row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 8rem 5rem 40px;
+  grid-template-columns: minmax(0, 1fr) 8rem 5rem 32px 40px;
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-2) var(--space-3);
@@ -700,7 +798,7 @@ function itemLabel(folder: Folder): string {
 .dropzone-inner strong { color: var(--text); }
 
 @media (max-width: 46rem) {
-  .row { grid-template-columns: minmax(0, 1fr) 32px; }
+  .row { grid-template-columns: minmax(0, 1fr) 32px 32px; }
   .row > .cell:nth-child(2), .row > .cell:nth-child(3),
   .row.head > span:nth-child(2), .row.head > span:nth-child(3) { display: none; }
   .topbar { padding-inline: var(--space-4); }
