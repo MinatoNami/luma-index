@@ -361,7 +361,7 @@ useHead({ title: computed(() => book.value ? `${book.value.title} — LumaIndex`
 </script>
 
 <template>
-  <div class="reader-shell">
+  <div class="reader-shell" :class="{ 'chrome-hidden': barHidden }">
     <header class="bar" :class="{ hidden: barHidden }">
       <div class="left">
         <NuxtLink class="back" :to="book?.folder ? `/?folder=${book.folder}` : '/'">
@@ -581,7 +581,19 @@ useHead({ title: computed(() => book.value ? `${book.value.title} — LumaIndex`
 </template>
 
 <style scoped>
-.reader-shell { height: 100dvh; display: flex; flex-direction: column; background: var(--bg); }
+.reader-shell {
+  height: 100dvh; display: flex; flex-direction: column;
+  /* The notch strip lives here, not on the bar. `overflow: hidden` clips at the
+     padding box, so collapsing the bar into its own padding still painted its
+     contents inside that padding — the bar appeared sliced in half, words and
+     all. The shell has nothing to leak, so the strip is only ever a colour. */
+  padding-top: env(safe-area-inset-top, 0px);
+  /* Matched to the bar while it is up and to the page once it goes, so the
+     strip never reads as a leftover sliver of chrome. */
+  background: var(--surface);
+  transition: background-color var(--duration) var(--ease);
+}
+.reader-shell.chrome-hidden { background: var(--surface-sunken); }
 .bar {
   display: flex; align-items: center; gap: var(--space-3);
   /* Collapsed rather than translated, so the reading area actually grows —
@@ -592,7 +604,8 @@ useHead({ title: computed(() => book.value ? `${book.value.title} — LumaIndex`
   /* Same reasoning as the library's topbar: viewport-fit=cover puts this under
      the status bar on a notched phone, and a scoped selector outranks anything
      global that tried to add the inset from outside. */
-  padding: max(var(--space-2), env(safe-area-inset-top))
+  /* Only the sides need insets now; the top one belongs to the shell. */
+  padding: var(--space-2)
            max(var(--space-3), env(safe-area-inset-right))
            var(--space-2)
            max(var(--space-3), env(safe-area-inset-left));
@@ -722,8 +735,9 @@ h1 { font-size: var(--text-base); font-weight: 500; margin: 0;
    put the page's text beneath the notch. Where there is no inset the value is
    0 and the bar goes entirely. */
 .bar.hidden {
-  max-height: env(safe-area-inset-top, 0px);
-  padding-block: env(safe-area-inset-top, 0px) 0;
+  /* Nothing left: no height and no padding, so there is no padding box for the
+     contents to be painted into. */
+  max-height: 0; padding-block: 0;
   border-bottom-color: transparent;
 }
 
