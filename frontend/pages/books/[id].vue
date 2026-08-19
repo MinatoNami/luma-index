@@ -355,13 +355,15 @@ useHead({ title: computed(() => book.value ? `${book.value.title} — LumaIndex`
       <div class="right">
         <AppButton v-if="book?.has_text_layer !== false" variant="ghost" size="sm" icon-only
                    icon="search" title="Find in book (⌘F)" @click="toggleSearch" />
-        <AppButton variant="ghost" size="sm" :title="'Zoom out'" @click="zoomOut">−</AppButton>
-        <AppButton variant="ghost" size="sm"
+        <AppButton class="zoom" variant="ghost" size="sm" :title="'Zoom out'"
+                   @click="zoomOut">−</AppButton>
+        <AppButton class="zoom" variant="ghost" size="sm"
                    :title="fit === 'fit-width' ? 'Fit page' : 'Fit width'"
                    @click="fit = fit === 'fit-width' ? 'fit-page' : 'fit-width'">
           {{ fit === 'fit-page' ? 'Fit page' : 'Fit width' }}
         </AppButton>
-        <AppButton variant="ghost" size="sm" :title="'Zoom in'" @click="zoomIn">+</AppButton>
+        <AppButton class="zoom" variant="ghost" size="sm" :title="'Zoom in'"
+                   @click="zoomIn">+</AppButton>
         <AppButton variant="ghost" size="sm"
                    :title="mode === 'continuous' ? 'Single page' : 'Continuous scroll'"
                    @click="mode = mode === 'continuous' ? 'single' : 'continuous'">
@@ -644,5 +646,32 @@ h1 { font-size: var(--text-base); font-weight: 500; margin: 0;
   .right :deep(button:nth-child(-n+3)) { display: none; }
   .outline { position: absolute; z-index: 10; height: calc(100% - 48px);
              box-shadow: var(--shadow-lg); }
+}
+
+/* On a phone this bar carried eleven controls and ran 72px past the screen,
+   which took the whole document with it. Zoom goes first: pinching is the
+   gesture people already use on a phone, and the three buttons that replace it
+   are the widest things here. The panels become overlays rather than columns,
+   since a 16rem sidebar beside a 375px screen leaves nothing for the page. */
+@media (max-width: 30rem) {
+  .zoom { display: none; }
+  .title { display: none; }
+  /* Typing a page number and reading a percentage are the two things a phone
+     can most afford to lose, and together they were 140px of a 375px bar —
+     enough that the back button and the panel toggles were being crushed to
+     16px, well under a usable touch target. Arrows and the contents panel
+     still navigate. */
+  .jump, .pct { display: none; }
+  .bar { gap: var(--space-1); }
+  /* `.left` is flex:1 with min-width:0 so the book title can truncate, and its
+     buttons inherited the right to shrink with it — down to 16px, half a
+     target and impossible to hit. The title still truncates; the controls no
+     longer pay for it. */
+  .left :deep(button), .left :deep(a) { flex: none; min-width: 36px; min-height: 36px; }
+  .notes-panel, .rail {
+    position: absolute; inset-block: 48px 0; right: 0; z-index: 10;
+    width: min(20rem, 88vw); box-shadow: var(--shadow-lg);
+  }
+  .outline { width: min(18rem, 88vw); }
 }
 </style>

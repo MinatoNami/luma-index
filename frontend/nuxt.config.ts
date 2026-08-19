@@ -31,6 +31,15 @@ export default defineNuxtConfig({
         { name: 'viewport', content: 'width=device-width, initial-scale=1, viewport-fit=cover' },
         { name: 'color-scheme', content: 'light dark' },
         { name: 'theme-color', content: '#4B4ACF' },
+        // Added to the Home Screen, iOS runs this without Safari's chrome.
+        // The manifest's `display` covers iOS 16.4 and up; this is the older
+        // switch, and harmless where the manifest is understood.
+        { name: 'apple-mobile-web-app-capable', content: 'yes' },
+        { name: 'mobile-web-app-capable', content: 'yes' },
+        // Translucent, so the status bar takes the page's own background
+        // rather than a black band above it.
+        { name: 'apple-mobile-web-app-status-bar-style', content: 'black-translucent' },
+        { name: 'apple-mobile-web-app-title', content: 'LumaIndex' },
       ],
       link: [
         // SVG first for anything modern; the PNGs cover Safari's touch icon and
@@ -38,6 +47,7 @@ export default defineNuxtConfig({
         { rel: 'icon', type: 'image/svg+xml', href: '/icon.svg' },
         { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/favicon-32.png' },
         { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' },
+        { rel: 'manifest', href: '/manifest.webmanifest' },
       ],
     },
   },

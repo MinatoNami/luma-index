@@ -22,6 +22,7 @@ const PATHS: Record<string, string> = {
   pencil: 'M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17Zm11-13 3 3',
   'arrow-up': 'M12 20V5m0 0-6 6m6-6 6 6',
   'arrow-down': 'M12 4v15m0 0 6-6m-6 6-6-6',
+  'sign-out': 'M15 17v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v2M10 12h11m0 0-3-3m3 3-3 3',
   'chevron-right': 'M9 6l6 6-6 6',
   'list-view': 'M4 6h16M4 12h16M4 18h16',
   'grid-view': 'M4 5h6v6H4Zm10 0h6v6h-6ZM4 13h6v6H4Zm10 0h6v6h-6Z',

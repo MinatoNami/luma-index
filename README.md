@@ -282,10 +282,22 @@ automated coverage. Those bugs were all about what a browser does with a canvas
 under `requestAnimationFrame`, which is the one thing this environment cannot
 run.
 
-The interface is responsive and its controls are touch-sized, but only desktop
-browsers have been exercised in anger. PRD §39 treats tablet as a primary
-reading target; in practice it is not one for this instance, so tablet-specific
-testing is not tracked as outstanding work.
+Every page has now been measured at 375px and none overflows horizontally,
+with each control at least 32px. That was not true before: the library's top
+bar ran 150px past a phone screen, which made the *document* wider than the
+viewport and left everything on it looking misaligned rather than merely
+cramped. The reader's bar ran 72px over and crushed its back button to 16px.
+
+It can be added to an iOS Home Screen and runs without Safari's chrome — a web
+app manifest with `display: standalone`, `viewport-fit=cover`, and safe-area
+insets on the bars that sit against the notch and the home indicator. There is
+no service worker, so it needs the network (and the tailnet) like any other
+page; nothing is available offline.
+
+Measured, not eyeballed, but on a desktop browser at a phone viewport — not on
+a real iPhone. PRD §39 treats tablet as a primary reading target; in practice
+it is not one for this instance, so tablet-specific testing is not tracked as
+outstanding work.
 
 No real relay has been used from here. Delivery was exercised end to end
 against a local SMTP sink — the message arrived with the right sender,

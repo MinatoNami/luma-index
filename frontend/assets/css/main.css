@@ -79,6 +79,29 @@ input[type="search"] { appearance: none; }
   overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
 }
 
+/* Safe areas ------------------------------------------------------------- */
+/* The viewport is declared `viewport-fit=cover`, so on a notched phone — and
+   especially once this is added to the Home Screen and runs without Safari's
+   chrome — the page is drawn under the status bar and the home indicator.
+   Anything pinned to an edge has to put the inset back itself.
+
+   Global rather than per-page: these bars are scoped styles in four different
+   files, and a rule that only some of them remembered is the kind that breaks
+   on whichever page nobody checked. */
+.topbar {
+  padding-top: max(var(--space-3), env(safe-area-inset-top));
+  padding-left: max(var(--space-5), env(safe-area-inset-left));
+  padding-right: max(var(--space-5), env(safe-area-inset-right));
+}
+.reader-shell .bar {
+  padding-top: max(var(--space-2), env(safe-area-inset-top));
+  padding-left: max(var(--space-3), env(safe-area-inset-left));
+  padding-right: max(var(--space-3), env(safe-area-inset-right));
+}
+/* The reader fills the screen, so its own scrolling area owes the home
+   indicator room at the bottom. */
+.reader-shell .viewport { padding-bottom: env(safe-area-inset-bottom); }
+
 /* PDF.js measures text by appending a scratch canvas straight to <body>. It is
    0x0, but it is a canvas — so `display: inline` — and an inline box still
    opens a line box, roughly one line-height of document sitting below the app.

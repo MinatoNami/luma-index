@@ -544,16 +544,17 @@ function itemLabel(folder: Folder): string {
       <div class="account">
         <ThemeToggle />
         <NuxtLink class="quiet-link" to="/shared">
-          <AppIcon name="inbox" :size="16" /> Shared
+          <AppIcon name="inbox" :size="16" /> <span class="label">Shared</span>
         </NuxtLink>
         <NuxtLink class="quiet-link" to="/trash">
-          <AppIcon name="trash" :size="16" /> Trash
+          <AppIcon name="trash" :size="16" /> <span class="label">Trash</span>
         </NuxtLink>
         <NuxtLink class="quiet-link" to="/settings">
-          <AppIcon name="settings" :size="16" /> Settings
+          <AppIcon name="settings" :size="16" /> <span class="label">Settings</span>
         </NuxtLink>
         <span class="who tertiary">{{ user?.display_name || user?.email }}</span>
-        <AppButton variant="ghost" size="sm" @click="logout">Sign out</AppButton>
+        <AppButton class="sign-out" variant="ghost" size="sm" icon="sign-out"
+                   @click="logout">Sign out</AppButton>
       </div>
     </header>
 
@@ -996,11 +997,38 @@ function itemLabel(folder: Folder): string {
 .dropzone-inner strong { color: var(--text); }
 
 @media (max-width: 46rem) {
-  .row { grid-template-columns: minmax(0, 1fr) 32px 32px; }
-  .row > .cell:nth-child(2), .row > .cell:nth-child(3),
-  .row.head > span:nth-child(2), .row.head > span:nth-child(3) { display: none; }
+  .row { grid-template-columns: 30px minmax(0, 1fr) 32px 40px; }
+  .row > .cell:nth-child(3), .row > .cell:nth-child(4),
+  .row.head > span:nth-child(3), .row.head > span:nth-child(4) { display: none; }
   .topbar { padding-inline: var(--space-4); }
   .who { display: none; }
+}
+
+/* On a phone the bar ran past the screen: three labelled links plus a sign-out
+   button want about 330px of the 375 available, and the brand takes the rest.
+   Nothing shrank or wrapped, so the *document* became 525px wide — which is
+   why the whole page looked misaligned rather than merely cramped.
+
+   The labels go and the icons stay. The words remain in the markup for screen
+   readers, and each link keeps a 40px target. */
+@media (max-width: 30rem) {
+  .topbar { padding-inline: var(--space-3); gap: var(--space-2); }
+  .brand strong { font-size: var(--text-base); }
+  .account { gap: var(--space-1); }
+  .quiet-link {
+    min-width: 40px; min-height: 40px;
+    justify-content: center; border-radius: var(--radius-sm);
+  }
+  /* :deep for the button, because its label lives inside AppButton and a
+     scoped rule stops at the component boundary — the first attempt at this
+     silently did nothing and made the bar wider, not narrower. */
+  .quiet-link .label,
+  .sign-out :deep(.label) {
+    position: absolute; width: 1px; height: 1px;
+    padding: 0; margin: -1px; overflow: hidden;
+    clip-path: inset(50%); white-space: nowrap; border: 0;
+  }
+  .sign-out { min-width: 40px; min-height: 40px; justify-content: center; }
 }
 
 /* -- selection ----------------------------------------------------------- */
