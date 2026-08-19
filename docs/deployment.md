@@ -113,30 +113,84 @@ backup before a risky migration:
 
 ## Backups
 
-`deploy.sh backup` runs `pg_dump --clean --if-exists` inside the postgres
-container and writes a gzipped plain-SQL dump to `/opt/lumaindex/backups/`.
-Plain SQL rather than a custom-format dump on purpose: it still restores after
-a PostgreSQL major-version change, which is exactly when you need it most.
-
-**The dump is only half the backup.** It contains the metadata — users,
-folders, book records, sharing, and eventually reading state — but not the
-PDFs themselves. Those live in the `library` volume and are **canonical**:
-LumaIndex is the only place they exist, unless the user still has the original
-upload. A database dump alone restores an empty library that knows the names of
-books nobody can open.
-
-So back up the volume too. This form needs no `sudo` and no knowledge of where
-Docker keeps its volumes:
-
 ```bash
-ssh USER@HOST "docker run --rm -v lumaindex_library:/src:ro alpine tar -C /src -czf - ." > library.tar.gz
+./deploy/deploy.sh backup
 ```
 
-Thumbnails and staging need no backup: thumbnails re-render from the PDFs, and
-staging holds only in-flight uploads.
+One command takes both halves, and both land **on the machine you ran it
+from** — which is the point. A backup living on the host it backs up survives
+every failure except the one you are actually afraid of.
 
-This is a change from the Drive-backed design, where the local copy was a cache
-and PRD §38 correctly said not to back it up. Owning the storage inverts that.
+```text
+backups/
+├── db/lumaindex-<stamp>.sql.gz   one snapshot per run
+├── library/ab/cd/<sha256>.pdf    a mirror of the PDFs
+└── manifest.txt                  what the last run saw
+```
+
+The two halves fail differently, so they are treated differently.
+
+**The database** is small and changes constantly, so it is snapshotted: one
+gzipped plain-SQL dump per run, `--clean --if-exists`. Plain SQL rather than a
+custom-format dump on purpose — it still restores after a PostgreSQL
+major-version change, which is exactly when you need it most. A copy also stays
+on the server, because restoring from that one is a single command and no
+transfer. `BACKUP_KEEP` (default 14) decides how many local dumps are kept.
+
+**The library** is large and never changes. Every file is named after the
+SHA-256 of its own contents, so a file already in the mirror cannot have
+different contents on the server — there is nothing to snapshot. Only new files
+travel, which makes the second backup and every one after it cheap.
+
+The mirror is **additive**. A file in it that is no longer on the server is
+either a book somebody deleted or a book somebody lost, and nothing here can
+tell those apart, so it stays. `--prune-library` is how you say you meant it.
+
+The PDFs are the half that matters most. They are canonical — LumaIndex is the
+only place they exist, unless the uploader still has the original — so a
+database dump on its own restores a catalogue of books nobody can open. That is
+what `--db-only` warns about, and it is a change from the Drive-backed design
+where the local copy was a cache and PRD §38 correctly said not to back it up.
+Owning the storage inverts that.
+
+Thumbnails and staging need no backup: thumbnails re-render from the PDFs
+(`./deploy/deploy.sh manage rebuild_thumbnails`), and staging holds only
+in-flight uploads.
+
+Neither half contains `.env`. Without `LUMA_FIELD_ENCRYPTION_KEY` the dump
+restores but its encrypted fields do not, so keep that somewhere else — a
+password manager, not the same disk.
+
+### Checking a backup is real
+
+```bash
+./deploy/deploy.sh verify
+```
+
+Every dump is tested with `gzip -t`, and every file in the mirror is hashed and
+compared against its own name. That total check is free because of how storage
+is addressed: the expected hash is the filename, so there is no separate
+checksum list that can drift out of date with the thing it describes.
+
+Run it after the first backup, and on a schedule if you have one. A backup
+nobody has checked is a hypothesis.
+
+### Doing this on a schedule
+
+`deploy.sh` runs from your machine over SSH, so schedule it there. A daily
+entry in `crontab -e`:
+
+```bash
+30 3 * * * cd ~/git-repos/luma-index && ./deploy/deploy.sh backup >> ~/luma-backup.log 2>&1
+```
+
+That needs a loaded SSH key, so on macOS add the key to the keychain
+(`ssh-add --apple-use-keychain ~/.ssh/id_ed25519`) or the job will hang waiting
+for a passphrase nobody is there to type.
+
+Set `BACKUP_DIR` in `deploy/deploy.env` to put the backup somewhere that is
+itself backed up or synced — an external disk, a NAS mount, a synced folder.
+Two copies in one building is one copy.
 
 ### The restore drill
 
@@ -181,6 +235,21 @@ docker compose exec -T postgres sh -c 'dropdb -U "$POSTGRES_USER" restore_drill'
 Restoring over the live database, when you actually need to, is
 `./deploy/deploy.sh restore <file>` — which stops the app first and asks for
 typed confirmation.
+
+Putting the *files* back is separate:
+
+```bash
+./deploy/deploy.sh restore:library
+```
+
+It sends only what the server does not already have, and never overwrites: a
+file already there has the contents its name says it has, so there is never a
+reason to replace one. After a restore onto an empty server, re-render the
+thumbnails:
+
+```bash
+./deploy/deploy.sh manage rebuild_thumbnails
+```
 
 ## Local development
 

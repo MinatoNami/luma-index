@@ -134,6 +134,18 @@ Three shapes carry the design:
 Deleting is a **trash**. An uploaded PDF may be the only copy its owner has, so
 deletion is reversible and destroying it is a separate, explicit step.
 
+**Backups land on the machine that runs the deploy script**, never only on the
+server — a backup on the host it backs up survives everything except the
+failure you are afraid of. The two halves are treated differently because they
+fail differently: the database is snapshotted per run, while the library is
+mirrored, since a file named after the SHA-256 of its own contents cannot hold
+anything else and so has nothing to snapshot. Only new files travel. The mirror
+is additive — a file missing on the server is either a book somebody deleted or
+a book somebody lost, and nothing can tell those apart. `deploy.sh verify`
+rehashes every file against its own name, which costs nothing to keep honest
+because the expected hash *is* the filename: no separate checksum list to drift
+out of date.
+
 **The trash can empty itself**, and does not unless told to. `TRASH_RETENTION_DAYS`
 is 0 by default, because this is the only code that destroys a file nobody
 asked it to destroy and storage here is canonical — the PDF in the trash may be
@@ -234,6 +246,13 @@ browsers have been exercised in anger. PRD §39 treats tablet as a primary
 reading target; in practice it is not one for this instance, so tablet-specific
 testing is not tracked as outstanding work.
 
+No server is configured in this checkout, so `deploy.sh backup` has never been
+run end to end. What has been exercised against the local stack is the part
+that could silently produce a broken backup: the selective `tar` fetch through
+`docker exec` (bytes arrive intact, shard layout preserved) and the hash check,
+including that it fails on a single flipped byte and refuses to run at all when
+no hashing tool is present rather than passing by comparing nothing to nothing.
+
 Trash retention is off on this instance, so its sweep has never destroyed
 anything here. The sweep itself, its refusal to touch a folder holding live
 items, and the worker running it on a pass are covered by tests; what has not
@@ -253,7 +272,6 @@ has to be checked in a real browser.**
 | What | Consequence |
 | --- | --- |
 | **Real email delivery** | Password reset works, but the console backend prints reset links into the log. Point `LUMA_EMAIL_BACKEND` at an SMTP relay before a second person has an account. |
-| **Off-box backups** | `deploy.sh backup` writes to the host it is backing up. The restore procedure itself has been rehearsed — see [the drill](docs/deployment.md#the-restore-drill) — but copying dumps and the `library` volume elsewhere is still manual. |
 | **Sharing with named people or groups** | §16 keeps this to private or shared-with-everyone-signed-in. The richer model is §43 future work and would change `library/permissions.py` alone. |
 
 ### Open question
