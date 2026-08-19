@@ -124,14 +124,24 @@ rexec() { ssh "${SSH_OPTS[@]}" "$SSH_TARGET" "$@"; }
 rscript() { ssh "${SSH_OPTS[@]}" "$SSH_TARGET" "bash -euo pipefail -s" ; }
 
 # Run docker compose in the current release, with the shared .env.
+#
+# The image tag comes from the release itself. Without it, `build` tagged the
+# images it made with the release stamp while `up -d` resolved LUMA_IMAGE_TAG
+# to its default and ran `:latest` — so every deploy after the first built the
+# new code and then started the old, silently. Reading it here means rollback
+# gets the previous release's tag for free, just by moving the symlink.
 rcompose() {
-    rexec "cd '$DEPLOY_PATH/current' && docker compose --env-file '$DEPLOY_PATH/shared/.env' $*"
+    rexec "cd '$DEPLOY_PATH/current' && \
+           LUMA_IMAGE_TAG=\"\$(cat '$DEPLOY_PATH/current/.image_tag' 2>/dev/null || echo latest)\" \
+           docker compose --env-file '$DEPLOY_PATH/shared/.env' $*"
 }
 
 # Interactive variant (allocates a TTY) for shells and prompts.
 rcompose_tty() {
     ssh -t "${SSH_OPTS[@]}" "$SSH_TARGET" \
-        "cd '$DEPLOY_PATH/current' && docker compose --env-file '$DEPLOY_PATH/shared/.env' $*"
+        "cd '$DEPLOY_PATH/current' && \
+         LUMA_IMAGE_TAG=\"\$(cat '$DEPLOY_PATH/current/.image_tag' 2>/dev/null || echo latest)\" \
+         docker compose --env-file '$DEPLOY_PATH/shared/.env' $*"
 }
 
 # --------------------------------------------------------------------------- #
@@ -292,6 +302,10 @@ cmd_deploy() {
     [ -n "$previous_dir" ] && info "previous $(basename "$previous_dir")"
 
     sync_code "$release_dir"
+
+    # Recorded before the build so `up -d` in this release — and in this
+    # release after a later rollback — runs exactly what was built here.
+    rexec "printf '%s' '${stamp}-${sha}' > '$release_dir/.image_tag'"
 
     step "Building images"
     rexec "cd '$release_dir' && LUMA_IMAGE_TAG='${stamp}-${sha}' \

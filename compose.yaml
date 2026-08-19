@@ -77,6 +77,11 @@ services:
       LUMA_MAX_UPLOAD_BYTES: ${LUMA_MAX_UPLOAD_BYTES:-2147483648}
       LUMA_MIN_FREE_DISK_BYTES: ${LUMA_MIN_FREE_DISK_BYTES:-2147483648}
       GUNICORN_WORKERS: ${GUNICORN_WORKERS:-3}
+      # Threads share a process, so workers x threads is the concurrency and
+      # workers x threads is also the Postgres connection count. Keep the
+      # product under max_connections (100 by default).
+      GUNICORN_THREADS: ${GUNICORN_THREADS:-4}
+      GUNICORN_WORKER_CLASS: ${GUNICORN_WORKER_CLASS:-gthread}
       GUNICORN_TIMEOUT: ${GUNICORN_TIMEOUT:-120}
       DJANGO_SUPERUSER_EMAIL: ${DJANGO_SUPERUSER_EMAIL:-}
       DJANGO_SUPERUSER_PASSWORD: ${DJANGO_SUPERUSER_PASSWORD:-}

@@ -308,8 +308,11 @@ has to be checked in a real browser.**
 ### Open question
 
 **Whether large reads should bypass gunicorn.** Byte ranges work, so a big book
-opens quickly, but a long download still occupies a worker for its duration. A
-tuning question now rather than a design one.
+opens quickly, but a long download still occupies a worker for its duration.
+Less pressing since the server moved to threaded workers — it now costs a
+thread rather than a process — but a genuinely large library served to several
+readers at once would still be better off with the bytes never entering
+Python.
 
 ---
 

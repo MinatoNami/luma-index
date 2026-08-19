@@ -182,6 +182,27 @@ smtplib's own default wait is measured in minutes, so an unreachable relay
 would otherwise hold a gunicorn worker open on every attempt until there were
 none left.
 
+## Uploads that take longer than the timeout
+
+Gunicorn runs the `gthread` worker, and that is not a performance preference.
+
+With the sync worker `--timeout` is the ceiling on a whole request, and the
+request body counts towards it. A 624 MB upload over a link doing 2 MB/s needs
+about four minutes, so at the 120-second default the worker was killed
+mid-stream: the reader waited two minutes and got a 500, and the log showed a
+`SystemExit` inside gunicorn's abort handler rather than anything resembling
+"too slow". Caddy's access log is where it is legible — `bytes_read` well short
+of `Content-Length`, and a duration exactly equal to `GUNICORN_TIMEOUT`.
+
+For every other worker class gunicorn treats `--timeout` as a liveness
+heartbeat, which the thread worker keeps sending while a request is still
+streaming. Long uploads and long PDF downloads then cost a thread rather than a
+whole process.
+
+`GUNICORN_WORKERS` x `GUNICORN_THREADS` is both the concurrency and the
+PostgreSQL connection count. Keep the product under `max_connections`, which is
+100 by default.
+
 ## Backups
 
 ```bash

@@ -85,10 +85,25 @@ else:
 PYEOF
 fi
 
-log "starting gunicorn with ${GUNICORN_WORKERS:-3} workers"
+# Threads, not plain sync workers.
+#
+# With the sync worker, --timeout is the ceiling on a whole request, and the
+# request body counts: a 600 MB upload over a slow link is killed mid-stream
+# once it passes the limit, and the reader sees a 500 having waited two
+# minutes to get it. Raising the timeout only moves the cliff, and weakens the
+# one thing it is there for — noticing a genuinely wedged worker.
+#
+# For every other worker class gunicorn treats --timeout as a liveness
+# heartbeat instead, which the thread worker keeps sending while a request is
+# still streaming. Long uploads and long PDF downloads then cost a thread
+# rather than a whole process, which is also the answer to holding a worker
+# open for the length of a download.
+log "starting gunicorn with ${GUNICORN_WORKERS:-3} workers x ${GUNICORN_THREADS:-4} threads"
 exec gunicorn config.wsgi:application \
     --bind 0.0.0.0:8000 \
+    --worker-class "${GUNICORN_WORKER_CLASS:-gthread}" \
     --workers "${GUNICORN_WORKERS:-3}" \
+    --threads "${GUNICORN_THREADS:-4}" \
     --timeout "${GUNICORN_TIMEOUT:-120}" \
     --graceful-timeout 30 \
     --access-logfile - \
