@@ -32,6 +32,8 @@ const emit = defineEmits<{
   select: [{ page: number; quads: Quad[]; text: string; x: number; y: number }]
   clearSelection: []
   openHighlight: [{ id: number; x: number; y: number }]
+  /** Which way the reader is moving, for anything that hides while reading. */
+  scrollDirection: [{ direction: 'up' | 'down'; atTop: boolean }]
 }>()
 
 // How many pages either side of the visible one keep their canvas.
@@ -344,7 +346,51 @@ function emitPosition() {
 }
 
 let scrollFrame = 0
+// Where the last direction call was made from, and how far we have travelled
+// since. A threshold rather than raw deltas: a trackpad or a thumb resting on
+// the glass produces a stream of one-pixel moves in both directions, and
+// reporting each one would make anything listening flicker.
+const DIRECTION_THRESHOLD = 24
+// Far enough down that hiding chrome does not fight the top of the document.
+const NEAR_TOP = 8
+let lastScrollTop = 0
+let travelled = 0
+let reportedDirection: 'up' | 'down' = 'up'
+
+function reportDirection() {
+  const el = viewport.value
+  if (!el) return
+
+  const top = el.scrollTop
+  const delta = top - lastScrollTop
+  lastScrollTop = top
+
+  if (top <= NEAR_TOP) {
+    // The top always reports 'up', whatever the accumulated travel says: the
+    // bar has to come back when the reader returns to the start of the book.
+    travelled = 0
+    if (reportedDirection === 'up') return
+    reportedDirection = 'up'
+    emit('scrollDirection', { direction: 'up', atTop: true })
+    return
+  }
+
+  // Travel resets whenever the direction changes, so a reversal starts
+  // counting from where it turned rather than from the last report.
+  if ((delta > 0) !== (travelled > 0)) travelled = 0
+  travelled += delta
+
+  if (Math.abs(travelled) < DIRECTION_THRESHOLD) return
+
+  const direction = travelled > 0 ? 'down' : 'up'
+  travelled = 0
+  if (direction === reportedDirection) return
+  reportedDirection = direction
+  emit('scrollDirection', { direction, atTop: false })
+}
+
 function onScroll() {
+  reportDirection()
   if (scrollFrame) return
   scrollFrame = requestAnimationFrame(() => {
     scrollFrame = 0

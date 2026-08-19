@@ -210,6 +210,22 @@ const totalPages = ref(data.value?.book.page_count ?? 0)
 const jumpTo = ref('')
 const readerError = ref('')
 
+/**
+ * The bar gets out of the way while you read forward, and comes back the
+ * moment you turn back.
+ *
+ * Never while the find bar is open — that sits underneath this one and would
+ * go with it, mid-search — and never at the top of the book, so there is
+ * always somewhere to reach the controls again without hunting for them.
+ */
+const barHidden = ref(false)
+
+function onReaderScroll({ direction, atTop }: { direction: 'up' | 'down'; atTop: boolean }) {
+  barHidden.value = !atTop && !searchOpen.value && direction === 'down'
+}
+
+watch(searchOpen, (open) => { if (open) barHidden.value = false })
+
 const contentUrl = computed(() => `/api/library/books/${bookId.value}/content`)
 const percentage = computed(() =>
   totalPages.value ? Math.round((page.value / totalPages.value) * 100) : 0)
@@ -346,7 +362,7 @@ useHead({ title: computed(() => book.value ? `${book.value.title} — LumaIndex`
 
 <template>
   <div class="reader-shell">
-    <header class="bar">
+    <header class="bar" :class="{ hidden: barHidden }">
       <div class="left">
         <NuxtLink class="back" :to="book?.folder ? `/?folder=${book.folder}` : '/'">
           <AppIcon name="chevron-right" :size="16" class="flip" />
@@ -463,7 +479,8 @@ useHead({ title: computed(() => book.value ? `${book.value.title} — LumaIndex`
                      @error="msg => (readerError = msg)"
                      @select="s => { pendingSelection = s; activeHighlight = null }"
                      @clear-selection="pendingSelection = null"
-                     @open-highlight="openHighlight" />
+                     @open-highlight="openHighlight"
+                     @scroll-direction="onReaderScroll" />
           <template #fallback>
             <div class="stage-loading"><span class="tertiary">Loading the reader…</span></div>
           </template>
@@ -567,6 +584,11 @@ useHead({ title: computed(() => book.value ? `${book.value.title} — LumaIndex`
 .reader-shell { height: 100dvh; display: flex; flex-direction: column; background: var(--bg); }
 .bar {
   display: flex; align-items: center; gap: var(--space-3);
+  /* Collapsed rather than translated, so the reading area actually grows —
+     sliding it out of view would leave behind the gap it used to fill. */
+  max-height: 6rem; overflow: hidden;
+  transition: max-height var(--duration) var(--ease),
+              padding-block var(--duration) var(--ease);
   /* Same reasoning as the library's topbar: viewport-fit=cover puts this under
      the status bar on a notched phone, and a scoped selector outranks anything
      global that tried to add the inset from outside. */
@@ -695,6 +717,20 @@ h1 { font-size: var(--text-base); font-weight: 500; margin: 0;
    gesture people already use on a phone, and the three buttons that replace it
    are the widest things here. The panels become overlays rather than columns,
    since a 16rem sidebar beside a 375px screen leaves nothing for the page. */
+/* Collapsed to exactly the safe-area strip, not to nothing: on a notched phone
+   that keeps the bar's own colour under the status bar, so hiding it does not
+   put the page's text beneath the notch. Where there is no inset the value is
+   0 and the bar goes entirely. */
+.bar.hidden {
+  max-height: env(safe-area-inset-top, 0px);
+  padding-block: env(safe-area-inset-top, 0px) 0;
+  border-bottom-color: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bar { transition: none; }
+}
+
 /* Above this the menu is redundant — every control is already in the bar. */
 .bar-overflow { display: none; }
 
