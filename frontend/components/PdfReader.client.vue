@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { PageRenderer, loadPdf, quadToBox, renderTextLayer, scaleFor, searchDocument,
          selectionToQuads, type FitMode, type SearchMatch } from '~/composables/usePdf'
+import type { PDFDocumentProxy } from 'pdfjs-dist'
+
 import type { Highlight, Quad } from '~/composables/useAnnotations'
 
 /**
@@ -461,7 +463,7 @@ function selectMatch(index: number) {
 }
 
 defineExpose({
-  doc: computed(() => renderer?.doc ?? null),
+  doc: computed<PDFDocumentProxy | null>(() => renderer?.doc ?? null),
   repaintHighlights: repaintAllHighlights,
   goTo,
   next: () => goTo(current.value + 1),

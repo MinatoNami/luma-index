@@ -49,7 +49,9 @@ watch(() => props.folder.preview_book_ids, () => { failed.value = [] })
              loading="lazy" decoding="async" @error="markFailed(id)" />
       </span>
     </div>
-    <span class="corner" aria-hidden="true"><AppIcon name="folder" :size="13" /></span>
+    <span v-if="!empty" class="corner" aria-hidden="true">
+      <AppIcon name="folder" :size="13" />
+    </span>
   </div>
 </template>
 
@@ -97,7 +99,6 @@ img {
   border: 1px solid var(--border);
   box-shadow: var(--shadow-sm);
 }
-.is-empty .corner { display: none; }
 
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 

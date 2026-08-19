@@ -13,10 +13,15 @@
 const { settings } = useSettings()
 
 useHead({
-  htmlAttrs: computed(() => {
-    const theme = settings.value?.theme
-    return theme === 'light' || theme === 'dark' ? { 'data-theme': theme } : {}
-  }),
+  htmlAttrs: {
+    // A getter rather than a computed wrapping the whole object: unhead
+    // resolves per-value functions, and typing a ComputedRef as the attrs bag
+    // itself does not satisfy the tag's own property type.
+    'data-theme': () => {
+      const theme = settings.value?.theme
+      return theme === 'light' || theme === 'dark' ? theme : undefined
+    },
+  },
 })
 </script>
 

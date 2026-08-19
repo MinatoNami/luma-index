@@ -62,7 +62,16 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
-      - run: npm run build
+      - name: Types
+        # The frontend went a long way with this only ever run by hand, and
+        # collected fourteen errors — one of which was a real bug: a highlight
+        # opened from the notes list passed an id where a position was wanted,
+        # so its controls never appeared.
+        run: npm run typecheck
+      - name: Tests
+        run: npm run test
+      - name: Build
+        run: npm run build
 
   shell:
     runs-on: ubuntu-latest

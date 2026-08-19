@@ -134,6 +134,14 @@ Three shapes carry the design:
 Deleting is a **trash**. An uploaded PDF may be the only copy its owner has, so
 deletion is reversible and destroying it is a separate, explicit step.
 
+**The frontend is typechecked and tested in CI**, which it was not. `npm run
+typecheck` had only ever been run by hand and had collected fourteen errors —
+one of them a real bug, where opening a highlight from the notes list passed an
+id where a click position was expected, so `activeHighlightRecord` looked for
+`.id` on a number, found nothing, and the popover's `v-if` silently never
+rendered. Clicking a highlight in the sidebar jumped to the page and then did
+nothing at all.
+
 **A password reset answers 204 even when the mail fails.** The endpoint
 already refused to say whether an address had an account; sending inside the
 request quietly undid that, because a 500 from a refused SMTP handshake says
@@ -250,7 +258,13 @@ Things built but unproven, or deliberately missing.
 
 Creating, removing and recolouring highlights, single-page navigation, and
 covers surviving a refresh were all unverified here and have since been
-confirmed working in a real browser.
+confirmed working in a real browser. Covers surviving a refresh now has a test
+that fails if the fix is removed, rather than resting on having looked once.
+
+The reader itself — its render window, canvas budget and search — has no
+automated coverage. Those bugs were all about what a browser does with a canvas
+under `requestAnimationFrame`, which is the one thing this environment cannot
+run.
 
 The interface is responsive and its controls are touch-sized, but only desktop
 browsers have been exercised in anger. PRD §39 treats tablet as a primary
@@ -311,7 +325,9 @@ tuning question now rather than a design one.
 | 6 — Sharing | Built |
 | 7 — Hardening | Built |
 
-425 backend tests, including a 64-case object-level permission matrix.
+425 backend tests, including a 64-case object-level permission matrix, and 44
+frontend tests over the logic that has actually broken here — selection
+ranges, cover loading states, sort labels.
 
 ---
 

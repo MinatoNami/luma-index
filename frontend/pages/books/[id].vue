@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import type { FitMode } from '~/composables/usePdf'
 import type { Book } from '~/composables/useLibrary'
-import type { HighlightColour, Quad } from '~/composables/useAnnotations'
+import type { PDFDocumentProxy } from 'pdfjs-dist'
+
+import type { Highlight, HighlightColour, Quad } from '~/composables/useAnnotations'
 
 const route = useRoute()
 const { api, ensureCsrf } = useApi()
@@ -34,6 +36,11 @@ const reader = ref<{
   searching: boolean
   doc: import('pdfjs-dist').PDFDocumentProxy | null
 } | null>(null)
+
+// Re-asserted rather than trusted: PDF.js brands PDFDocumentProxy with class
+// private fields, and the structural copy that comes back through a template
+// ref has lost them, so the two no longer look like the same type.
+const thumbnailDoc = computed(() => (reader.value?.doc ?? null) as PDFDocumentProxy | null)
 
 const thumbnails = ref(false)
 const annotationsOpen = ref(false)
@@ -88,6 +95,23 @@ function openHighlight(payload: { id: number; x: number; y: number }) {
   // to the note editor, which left no way to change the colour or remove it —
   // so a highlight, once made, was permanent.
   activeHighlight.value = payload
+}
+
+/**
+ * The same controls, opened from the notes list rather than from the page.
+ *
+ * The popover is placed at a point because on the page it opens where the
+ * highlight was clicked. A list row has no such point, so it anchors under the
+ * row instead. This used to pass the bare id: `activeHighlightRecord` then
+ * looked for `.id` on a number, found undefined, and the popover's `v-if`
+ * quietly failed — clicking a highlight in the sidebar jumped to the page and
+ * then did nothing at all.
+ */
+function openHighlightFromList(mark: Highlight, event: MouseEvent) {
+  reader.value?.goTo(mark.page + 1)
+  const row = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  // Centred, because the popover is translated back by half its own width.
+  openHighlight({ id: mark.id, x: row.left + row.width / 2, y: row.bottom })
 }
 
 function editNote() {
@@ -390,7 +414,7 @@ useHead({ title: computed(() => book.value ? `${book.value.title} — LumaIndex`
         </ul>
       </aside>
 
-      <PageThumbnails v-if="thumbnails" :doc="reader?.doc ?? null"
+      <PageThumbnails v-if="thumbnails" :doc="thumbnailDoc"
                       :page-count="totalPages" :current="page"
                       @select="n => reader?.goTo(n)" />
 
@@ -443,7 +467,7 @@ useHead({ title: computed(() => book.value ? `${book.value.title} — LumaIndex`
           <h3>Highlights</h3>
           <ul>
             <li v-for="mark in notes.highlights.value" :key="mark.id">
-              <button type="button" @click="reader?.goTo(mark.page + 1); openHighlight(mark.id)">
+              <button type="button" @click="openHighlightFromList(mark, $event)">
                 <span :class="['swatch', mark.colour]" aria-hidden="true" />
                 <span class="excerpt">{{ mark.selected_text || `Page ${mark.page + 1}` }}</span>
                 <span v-if="mark.note" class="tertiary note-preview">{{ mark.note }}</span>
