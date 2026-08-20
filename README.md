@@ -25,11 +25,12 @@ Caddy and a background worker — reachable over
 | --- | --- |
 | **Upload** | Drag PDFs in from your computer — onto the page, or straight onto a folder. Large files are sent in pieces and resume where they left off if the connection drops. A ZIP has its folder structure rebuilt on import. Identical files are stored once. |
 | **Organise** | Folders you create, rename, and delete. Drag items onto a folder to move them, or use the picker on any row. Tick several — shift-click for a run — and move, trash, favourite or collect them in one go. Each folder wears a mosaic of the covers inside it. Sort either by name, date added, last modified, size, or type. Deleting goes to a trash you can restore from — sortable too, including by when you deleted it. |
-| **Read** | A PDF.js reader: continuous scroll or single page, zoom, text selection, search within the book, an outline sidebar, page thumbnails. |
+| **Read** | A PDF.js reader: continuous scroll or single page, zoom, text selection, search within the book, an outline sidebar, page thumbnails. The toolbar gets out of the way as you read forward and comes back when you scroll up. A book you have opened before opens from cache. |
 | **Resume** | Your place is saved as you read and picked up on any other device. |
 | **Annotate** | Bookmarks, highlighted passages in four colours, notes on a highlight, and page notes for scans with no text layer. |
 | **Collect** | Star a book as a favourite, or gather books into collections that cut across folders. |
 | **Share** | Mark a book shared and anyone signed in can read it — while keeping their own place and their own notes. |
+| **On a phone** | Add it to the Home Screen and it runs without browser chrome. Labels give way to icons on a narrow screen, and the reader's secondary controls move into one menu rather than crowding the bar. |
 
 ## What it deliberately does not do
 
@@ -299,14 +300,28 @@ cramped. The reader's bar ran 72px over and crushed its back button to 16px.
 
 It can be added to an iOS Home Screen and runs without Safari's chrome — a web
 app manifest with `display: standalone`, `viewport-fit=cover`, and safe-area
-insets on the bars that sit against the notch and the home indicator. There is
-no service worker, so it needs the network (and the tailnet) like any other
-page; nothing is available offline.
+insets wherever the layout meets an edge. Those live in the pages' own scoped
+styles rather than a global sheet, because a scoped selector carries an
+attribute and outranks a global rule for the same class; the first attempt put
+them in `main.css` and they never applied to anything. In the reader the top
+inset belongs to the shell rather than the bar, so the bar can collapse to
+nothing when it hides — `overflow: hidden` clips at the padding box, so a bar
+collapsed into its own padding still paints its contents there.
 
-Measured, not eyeballed, but on a desktop browser at a phone viewport — not on
-a real iPhone. PRD §39 treats tablet as a primary reading target; in practice
-it is not one for this instance, so tablet-specific testing is not tracked as
-outstanding work.
+There is no service worker, so it needs the network (and the tailnet) like any
+other page; nothing is available offline.
+
+Measured at a phone viewport in a desktop browser, and since used for real as a
+Home Screen app on an iPhone 13 — which is where the layout was actually
+settled. The desktop viewport missed three things that only the device showed:
+the safe-area rules silently losing to scoped styles, a collapsed bar still
+painting its own contents inside its padding, and a bar of nine controls that
+fitted the width but read as one undifferentiated row of glyphs. Overflow
+arithmetic is not the same as looking at it.
+
+PRD §39 treats tablet as a primary reading target; in practice it is not one
+for this instance, so tablet-specific testing is not tracked as outstanding
+work.
 
 No real relay has been used from here. Delivery was exercised end to end
 against a local SMTP sink — the message arrived with the right sender,
@@ -315,12 +330,24 @@ connection, and a relay that will not accept credentials. What has not been
 tried is a provider that wants an app password or rejects the From domain,
 which is exactly what `check_email` is for.
 
-No server is configured in this checkout, so `deploy.sh backup` has never been
-run end to end. What has been exercised against the local stack is the part
-that could silently produce a broken backup: the selective `tar` fetch through
-`docker exec` (bytes arrive intact, shard layout preserved) and the hash check,
-including that it fails on a single flipped byte and refuses to run at all when
-no hashing tool is present rather than passing by comparing nothing to nothing.
+This is deployed, on an Ubuntu host reached over Tailscale, alongside unrelated
+services — which is why `bootstrap.sh` was skipped there and its three jobs
+done by hand (see [the deployment notes](docs/deployment.md)). Running it for
+the first time found two bugs that had never executed: a `set -e` abort from a
+trailing `&&`, and an SSH control-socket path too long for a Unix socket on
+macOS. A third was worse — `build` tagged images with the release stamp while
+`up -d` resolved the default and started `:latest`, so every deploy after the
+first ran the previous code.
+
+`backup`, `verify` and `restore:library` have all run against that server. The
+library mirror was exercised with a real blob: the bytes came back
+byte-identical over the `tar`-through-`docker exec` stream with the hash
+matching its own name, a single flipped byte is caught, and the hash check
+refuses to run at all when no hashing tool is present rather than passing by
+comparing nothing to nothing.
+
+What has not been tried is a restore onto an empty server. The parts are
+proven; the drill as a whole is not.
 
 Trash retention is off on this instance, so its sweep has never destroyed
 anything here. The sweep itself, its refusal to touch a folder holding live
@@ -377,9 +404,11 @@ ranges, cover loading states, sort labels.
 backend/            Django + DRF
   accounts/           users, sessions, password reset, preferences
   library/            folders, books, storage, uploads, reader data, sharing
+                      quota.py, retention.py, chunked.py, sorting.py, previews.py
   api/                routing, health probes, OpenAPI schema
   common/             logging with credential redaction, advisory locks
 frontend/           Nuxt 3 — library browser, reader, settings
+  tests/              Vitest over the logic that has actually broken here
 caddy/              reverse proxy configuration
 deploy/             bootstrap.sh and deploy.sh
 docs/               deployment guide and per-phase design records
@@ -391,6 +420,7 @@ scripts/            check-contrast.py — verifies the palette against WCAG AA
 | Layer | Choice |
 | --- | --- |
 | Frontend | Nuxt 3, Vue 3, TypeScript, PDF.js |
+| Tests | pytest + pytest-django, Vitest + Vue Test Utils, ruff, vue-tsc, ShellCheck |
 | Backend | Django 5.2 LTS, Django REST Framework |
 | Database | PostgreSQL 16 |
 | Documents | pypdfium2 (Apache-2.0), Pillow |

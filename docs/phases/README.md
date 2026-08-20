@@ -8,20 +8,26 @@ which of the 31 MVP success criteria (§45) it proves.
 | --- | --- | --- |
 | 1 — Platform foundation | **Built** | see the repository and [deployment.md](../deployment.md) |
 | 2 — Uploads, folders, storage | **Built** | [02-uploads.md](02-uploads.md) |
-| 3 — Library | **Partly built** | [03-library.md](03-library.md) |
+| 3 — Library | **Built** | [03-library.md](03-library.md) |
 | 4 — PDF reader | **Built** | [04-reader.md](04-reader.md) |
 | 5 — Bookmarks, highlights, notes | **Built** | [05-reading-data.md](05-reading-data.md) |
 | 6 — Sharing | **Built** | [06-sharing.md](06-sharing.md) |
-| 7 — Hardening | Scoped | [07-hardening.md](07-hardening.md) |
+| 7 — Hardening | **Built** | [07-hardening.md](07-hardening.md) |
 
 ---
 
-Phase 3 is half-done as a side effect of Phase 2 and the interface work: list,
-grid and large-icon views, covers, search and sort all exist. What remains is
-collections, favourites, and the virtual views — and three of those
-(Continue Reading, Recently Opened, Shared With Me) need models from Phases 4
-and 6, so the rest of Phase 3 is best finished after the reader rather than
-before it.
+All seven phases are built. Phase 3 finished last rather than third, which was
+the right order: collections and favourites were straightforward, but three of
+its virtual views (Continue Reading, Recently Opened, Shared With Me) need
+models that Phases 4 and 6 introduce, so finishing it before the reader would
+have meant writing them twice.
+
+What has been added since the phases were written is not in them: resumable
+uploads, per-account storage quotas, trash retention, conditional requests for
+book content, a folder-preview mosaic, multi-select, and the phone layout. The
+per-phase documents describe the decisions taken at the time and are left as
+that record rather than rewritten; the [README](../../README.md) is the
+description of what the system does now.
 
 ## Decisions that outlive their phase
 
@@ -49,7 +55,7 @@ Phase 1  platform          ✅ built
    │
 Phase 2  uploads + folders ✅ built — Book + BookSource, which the rest assumes
    │
-   ├── Phase 3  library    collections, search, virtual views
+   ├── Phase 3  library    ✅ built — collections, search, virtual views
    │      │
    │   Phase 4  reader     needs a book to open
    │      │

@@ -223,6 +223,25 @@ A relayed path still works. It is simply slow enough — around 2 MB/s here —
 that a large upload becomes a multi-minute request, which is why uploads are
 chunked and resumable rather than relying on one connection surviving.
 
+## Putting it on a phone
+
+There is no install prompt on iOS — you have to go and find it. Open the
+instance in **Safari** (Chrome on iOS cannot add to the Home Screen), then
+Share → Add to Home Screen. It then runs without browser chrome, because the
+manifest declares `display: standalone`.
+
+Two things to expect:
+
+* **The phone has to be on the tailnet.** The MagicDNS name does not resolve
+  anywhere else, so launching the app with Tailscale off gives a network error,
+  not a cached library.
+* **Nothing works offline.** There is no service worker. That is deliberate: a
+  stale cache in front of a PDF library is a worse failure than a clear network
+  error, and none of this is useful without the server anyway.
+
+iOS caches the manifest and its metas aggressively. After changing either,
+delete the Home Screen icon and add it again, or the old settings persist.
+
 ## Backups
 
 ```bash
