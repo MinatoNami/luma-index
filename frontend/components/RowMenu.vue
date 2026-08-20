@@ -80,4 +80,10 @@ function choose(action: RowAction) {
 .items button.danger:hover { background: var(--danger-soft); }
 
 @keyframes pop { from { opacity: 0; transform: translateY(-3px); } }
+
+/* Same reasoning as the dialog: the menu still appears, it simply does not
+   travel to get there. */
+@media (prefers-reduced-motion: reduce) {
+  .items { animation: none; }
+}
 </style>

@@ -449,7 +449,7 @@ useHead({ title: computed(() => book.value ? `${book.value.title} — LumaIndex`
       This looks like a scan, so it has no searchable text.
     </p>
 
-    <div class="body">
+    <main class="body">
       <aside v-if="sidebar && outline.length" class="outline">
         <h2>Contents</h2>
         <ul>
@@ -542,7 +542,7 @@ useHead({ title: computed(() => book.value ? `${book.value.title} — LumaIndex`
           </ul>
         </section>
       </aside>
-    </div>
+    </main>
 
     <!-- Selection toolbar -->
     <div v-if="pendingSelection && !scanned" class="selection-bar"

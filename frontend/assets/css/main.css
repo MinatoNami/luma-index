@@ -79,6 +79,13 @@ input[type="search"] { appearance: none; }
   overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
 }
 
+/* Minimum target size ----------------------------------------------------- */
+/* WCAG 2.2 SC 2.5.8 asks for 24x24. These header links were 23px tall — a
+   text link with no padding — on every page except the library, whose own
+   narrow-screen rule already gave them 40px. Global rather than scoped because
+   nothing scoped declares their height, so there is nothing here to lose to. */
+.quiet-link { min-height: 32px; }
+
 /* Safe areas ------------------------------------------------------------- */
 /* The viewport is declared `viewport-fit=cover`, so a notched phone draws the
    page under the status bar and the home indicator — most visibly once this is

@@ -559,6 +559,10 @@ function itemLabel(folder: Folder): string {
     </header>
 
     <main class="wrap">
+      <!-- The subject of the page, for anyone navigating by heading. Visually
+           the breadcrumb already says it, so this is not shown twice. -->
+      <h1 class="sr-only">{{ currentFolder?.name || 'My library' }}</h1>
+
       <nav class="crumbs" aria-label="Breadcrumb">
         <button type="button" class="crumb" @click="goTo(null)">My library</button>
         <template v-for="crumb in breadcrumbs" :key="crumb.id">
@@ -571,10 +575,14 @@ function itemLabel(folder: Folder): string {
         </template>
       </nav>
 
-      <div class="views" role="tablist" aria-label="Library views">
-        <button v-for="view in VIEWS" :key="view.value" type="button" role="tab"
+      <!-- Toggle buttons in a labelled group, not a tablist. These filter the
+           listing in place; there are no tabpanels to own and no arrow-key
+           model, and the last item is a link to a different page — all three of
+           which a tablist promises a screen reader it will find. -->
+      <div class="views" role="group" aria-label="Library views">
+        <button v-for="view in VIEWS" :key="view.value" type="button"
                 :class="['chip', { active: activeView === view.value && !activeCollection }]"
-                :aria-selected="activeView === view.value && !activeCollection"
+                :aria-pressed="activeView === view.value && !activeCollection"
                 @click="selectView(view.value)">
           <AppIcon :name="view.icon" :size="15" /> {{ view.label }}
         </button>
@@ -596,6 +604,7 @@ function itemLabel(folder: Folder): string {
         <AppButton variant="primary" icon="upload" :loading="busy"
                    @click="fileInput?.click()">Upload</AppButton>
         <input ref="fileInput" class="sr-only" type="file" multiple tabindex="-1"
+               aria-label="Choose PDFs or a ZIP to upload"
                accept="application/pdf,.pdf,.zip,application/zip" @change="onPick" />
       </div>
 
@@ -677,12 +686,12 @@ function itemLabel(folder: Folder): string {
       <!-- List --------------------------------------------------------- -->
       <div v-else-if="view === 'list'" class="listing panel">
         <div class="row head">
-          <span class="pick">
+          <label class="pick">
             <input type="checkbox" :checked="selection.allSelected.value"
                    :indeterminate="selection.active.value && !selection.allSelected.value"
                    aria-label="Select everything here"
                    @change="selection.allSelected.value ? selection.clear() : selection.selectAll()" />
-          </span>
+          </label>
           <span>Name</span><span>Size</span><span>Pages</span><span />
         </div>
         <div v-for="folder in folders" :key="`f${folder.id}`" class="row"
@@ -692,11 +701,11 @@ function itemLabel(folder: Folder): string {
              @dragstart="onRowDragStart($event, 'folder', folder.id)" @dragend="onRowDragEnd"
              @dragover="onFolderDragOver($event, folder)"
              @dragleave="dropTarget = 'none'" @drop="onFolderDrop($event, folder)">
-          <span class="pick">
+          <label class="pick">
             <input type="checkbox" :checked="selection.has('folder', folder.id)"
                    :aria-label="`Select ${folder.name}`"
                    @click.stop @change="selection.toggle('folder', folder.id)" />
-          </span>
+          </label>
           <button class="cell name" type="button"
                   @click="rowClick('folder', folder.id, $event, () => open(folder))">
             <span class="folder-chip"><AppIcon name="folder" :size="17" /></span>
@@ -710,11 +719,11 @@ function itemLabel(folder: Folder): string {
              :style="{ order: filesFirst ? 1 : 2 }"
              :class="{ 'is-selected': selection.has('book', book.id) }" draggable="true"
              @dragstart="onRowDragStart($event, 'book', book.id)" @dragend="onRowDragEnd">
-          <span class="pick">
+          <label class="pick">
             <input type="checkbox" :checked="selection.has('book', book.id)"
                    :aria-label="`Select ${book.title}`"
                    @click.stop @change="selection.toggle('book', book.id)" />
-          </span>
+          </label>
           <NuxtLink class="cell name" :to="bookHref(book)"
                     @click="rowClick('book', book.id, $event)">
             <BookCover :book="book" size="sm" />
@@ -892,7 +901,14 @@ function itemLabel(folder: Folder): string {
         color: var(--text-tertiary); cursor: pointer; }
 .star:hover { background: var(--surface-hover); color: var(--text); }
 .star.on { color: var(--warning); }
-.card-star { position: absolute; top: var(--space-2); left: var(--space-2);
+ /* Beside the menu, not in the top-left corner. Selection took that corner
+    when multi-select arrived, and the checkbox sits above the star with a
+    z-index — so on a phone, where the checkbox is always shown rather than
+    revealed on hover, it covered the star completely and a book could not be
+    favourited from its card at all. The two per-item actions now live together
+    on the right, and selection owns the left. */
+.card-star { position: absolute; top: var(--space-2);
+             right: calc(var(--space-2) + 32px + var(--space-1));
              background: var(--surface); border-radius: var(--radius-sm); }
 
 .toolbar { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; }
@@ -1044,8 +1060,12 @@ function itemLabel(folder: Folder): string {
 }
 
 /* -- selection ----------------------------------------------------------- */
-.pick { display: grid; place-items: center; }
-.pick input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+/* The whole cell is the target, not just the box inside it. A 16px checkbox
+   is under WCAG 2.2's 24px minimum (SC 2.5.8) and is a genuinely awkward thing
+   to hit with a thumb; the cell was already 30px wide and paying for the
+   space. */
+.pick { display: grid; place-items: center; min-height: 32px; cursor: pointer; }
+.pick input { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
 
 .row.is-selected, .card.is-selected { background: var(--accent-soft); }
 .card.is-selected { box-shadow: 0 0 0 2px var(--accent); }
@@ -1055,7 +1075,10 @@ function itemLabel(folder: Folder): string {
 .card-pick {
   position: absolute; top: var(--space-2); left: var(--space-2); z-index: 1;
   display: grid; place-items: center;
-  width: 24px; height: 24px; border-radius: var(--radius-sm);
+  /* 30/24 rather than 24/15: the checkbox itself is the focusable target, so it
+     is the thing that has to meet WCAG 2.2's 24px minimum — sizing only the
+     label around it left a 15px hit area. */
+  width: 30px; height: 30px; border-radius: var(--radius-sm);
   background: var(--surface); box-shadow: var(--shadow-sm);
   opacity: 0; transition: opacity var(--duration) var(--ease);
   cursor: pointer;
@@ -1063,7 +1086,7 @@ function itemLabel(folder: Folder): string {
 .card:hover .card-pick,
 .card-pick:focus-within,
 .card-pick.on { opacity: 1; }
-.card-pick input { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
+.card-pick input { width: 24px; height: 24px; accent-color: var(--accent); cursor: pointer; }
 
 /* Touch has no hover, so there would be no way to reach it at all. */
 @media (hover: none) {

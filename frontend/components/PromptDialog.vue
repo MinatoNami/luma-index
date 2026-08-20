@@ -112,4 +112,11 @@ form { margin-top: var(--space-4); }
 
 @keyframes fade { from { opacity: 0; } }
 @keyframes rise { from { opacity: 0; transform: translateY(6px) scale(0.99); } }
+
+/* A dialog that fades and rises is exactly the motion someone with vestibular
+   sensitivity asks the system to stop. It still appears; it just appears
+   without travelling. */
+@media (prefers-reduced-motion: reduce) {
+  .backdrop, .dialog { animation: none; }
+}
 </style>

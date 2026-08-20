@@ -143,6 +143,23 @@ id where a click position was expected, so `activeHighlightRecord` looked for
 rendered. Clicking a highlight in the sidebar jumped to the page and then did
 nothing at all.
 
+**Accessibility is audited, not assumed.** PRD §40 lists seven requirements and
+only contrast had ever been checked. An axe-core pass over every page, at
+desktop and phone width, now comes back clean against WCAG 2.1 AA and 2.2 AA —
+it did not before. What it found was mostly real: no `lang` on `<html>`
+anywhere, a filter row marked up as a `tablist` when it has no tabpanels and no
+arrow-key model (a promise to a screen reader that nothing kept), the reader's
+page area scrolling without being focusable so a keyboard user could reach every
+button and still not move the page, and no `main` landmark in the reader at all.
+
+Two of its findings were layout bugs rather than markup ones. Row checkboxes
+were 16px against WCAG 2.2's 24px floor, and on a book card the favourite star
+and the select checkbox were both positioned in the top-left corner — the
+checkbox above it with a `z-index`, so on a phone, where selection is always
+visible rather than revealed on hover, it covered the star completely and a book
+could not be favourited from its card at all. Selection now owns the left
+corner and the two per-item actions sit together on the right.
+
 **A book is downloaded once.** `/content` answers with the file's storage key
 as its ETag, which content addressing makes both free and exact — the key is
 the SHA-256 of the bytes, so it cannot claim "unchanged" about a file that

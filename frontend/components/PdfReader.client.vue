@@ -611,7 +611,13 @@ onBeforeUnmount(() => resizeObserver?.disconnect())
 </script>
 
 <template>
-  <div ref="viewport" class="viewport"
+  <!-- Focusable, because it scrolls. Without a tabindex a keyboard user could
+       reach every button in the reader and still not move the page — axe calls
+       this scrollable-region-focusable, and it was the one real keyboard
+       failure here. PageUp/PageDown stay bound to page turns at the window
+       level; the arrows and space scroll this natively. -->
+  <div ref="viewport" class="viewport" tabindex="0"
+       role="region" aria-label="Book pages"
        @scroll.passive="onScroll"
        @mouseup="onSelectionEnd" @touchend="onSelectionEnd">
     <p v-if="failed || pageError" class="notice notice-error" role="alert">

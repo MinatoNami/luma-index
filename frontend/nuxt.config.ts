@@ -25,6 +25,9 @@ export default defineNuxtConfig({
 
   app: {
     head: {
+      // Every page was missing this. A screen reader needs it to choose a
+      // voice, and a browser to choose hyphenation and quote marks.
+      htmlAttrs: { lang: 'en' },
       title: 'LumaIndex',
       meta: [
         { charset: 'utf-8' },
