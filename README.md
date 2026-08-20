@@ -318,10 +318,19 @@ covers surviving a refresh were all unverified here and have since been
 confirmed working in a real browser. Covers surviving a refresh now has a test
 that fails if the fix is removed, rather than resting on having looked once.
 
-The reader itself — its render window, canvas budget and search — has no
-automated coverage. Those bugs were all about what a browser does with a canvas
-under `requestAnimationFrame`, which is the one thing this environment cannot
-run.
+The reader has a Playwright harness now — `./scripts/e2e.sh` — which runs real
+Chromium in a container on the compose network, so `requestAnimationFrame` and
+canvas rendering actually happen. The harness works and two tests pass
+reliably; four more are checked in as `fixme` rather than left red, because
+they infer "this page rendered" from canvas dimensions, and PDF.js sizes a
+canvas before it awaits the render. Waiting on the reader — which already knows
+when a page finished — instead of on the DOM is the fix, and it changes the
+component's public surface, so it wants doing deliberately.
+
+Building it did catch one real thing: the suite inherited a saved
+`reader_mode` of `single`, in which one page is laid out and nothing scrolls,
+so three tests were quietly asserting things about a reader that could not
+move. A suite that reads a user's preferences has to set them.
 
 Every page has now been measured at 375px and none overflows horizontally,
 with each control at least 32px. That was not true before: the library's top
