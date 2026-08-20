@@ -1,81 +1,45 @@
 # Implementation phases
 
-One document per phase from PRD §44. Each states its goal, the decisions to
-settle *before* writing code, the data model, the API surface, the risks, and
-which of the 31 MVP success criteria (§45) it proves.
+One document per phase from PRD §44, recording what each decided and why. All
+seven are built; these are kept as the design record, not as current
+documentation — the [README](../../README.md) describes what the system does
+now.
 
-| Phase | Status | Document |
-| --- | --- | --- |
-| 1 — Platform foundation | **Built** | see the repository and [deployment.md](../deployment.md) |
-| 2 — Uploads, folders, storage | **Built** | [02-uploads.md](02-uploads.md) |
-| 3 — Library | **Built** | [03-library.md](03-library.md) |
-| 4 — PDF reader | **Built** | [04-reader.md](04-reader.md) |
-| 5 — Bookmarks, highlights, notes | **Built** | [05-reading-data.md](05-reading-data.md) |
-| 6 — Sharing | **Built** | [06-sharing.md](06-sharing.md) |
-| 7 — Hardening | **Built** | [07-hardening.md](07-hardening.md) |
+| Phase | Document |
+| --- | --- |
+| 1 — Platform foundation | the repository and [deployment.md](../deployment.md) |
+| 2 — Uploads, folders, storage | [02-uploads.md](02-uploads.md) |
+| 3 — Library | [03-library.md](03-library.md) |
+| 4 — PDF reader | [04-reader.md](04-reader.md) |
+| 5 — Bookmarks, highlights, notes | [05-reading-data.md](05-reading-data.md) |
+| 6 — Sharing | [06-sharing.md](06-sharing.md) |
+| 7 — Hardening | [07-hardening.md](07-hardening.md) |
 
----
+Phase 3 finished last rather than third, which was the right order: three of its
+virtual views (Continue Reading, Recently Opened, Shared With Me) need models
+that Phases 4 and 6 introduce, so finishing it early would have meant writing
+them twice.
 
-All seven phases are built. Phase 3 finished last rather than third, which was
-the right order: collections and favourites were straightforward, but three of
-its virtual views (Continue Reading, Recently Opened, Shared With Me) need
-models that Phases 4 and 6 introduce, so finishing it before the reader would
-have meant writing them twice.
-
-What has been added since the phases were written is not in them: resumable
-uploads, per-account storage quotas, trash retention, conditional requests for
-book content, a folder-preview mosaic, multi-select, and the phone layout. The
-per-phase documents describe the decisions taken at the time and are left as
-that record rather than rewritten; the [README](../../README.md) is the
-description of what the system does now.
+Work added after these were written is not in them — resumable uploads, storage
+quotas, trash retention, conditional requests, folder previews, multi-select,
+and the phone layout. Two things they describe were also removed: Google Drive
+as canonical storage, and the evictable PDF cache that went with it.
 
 ## Decisions that outlive their phase
 
-Six choices are expensive to reverse because data or licensing accumulates
-behind them. Each is argued where it belongs; they are collected here so none
-is discovered late.
+Six choices were expensive to reverse because data or licensing accumulates
+behind them. All six are settled.
 
-| # | Decision | Where | Why it cannot wait |
-| --- | --- | --- | --- |
-| 1 | ~~Google OAuth scope route~~ | — | **Moot.** Drive was removed in favour of uploads. |
-| 2 | **PDF rendering library** | [Phase 2](02-uploads.md) | Settled: pypdfium2 (Apache-2.0). PyMuPDF is AGPL, and swapping it after it is woven through import, search, and the reader is a rewrite. |
-| 3 | **Where ingestion executes** | [Phase 2](02-uploads.md) | Settled: a polling worker. A ZIP of several hundred books cannot be extracted inside a request. |
-| 4 | ~~How PDF bytes reach the browser~~ | [Phase 4 D1](04-reader.md) | **Settled.** The endpoint returns 206 for byte ranges and PDF.js fetches only what it needs. Whether large reads should bypass gunicorn entirely is now a tuning question, not a design one. |
-| 5 | **Highlight anchoring format** | [Phase 5 D1](05-reading-data.md) | Once highlights exist, the coordinates cannot be recomputed — the mapping depended on a viewport that is gone. |
-| 6 | ~~The deletion matrix~~ | [Phase 6 D1](06-sharing.md) · `library/lifecycle.py` | **Settled.** The table lives in the module docstring. The load-bearing choice: un-sharing keeps other readers' annotations, deleting the book does not. |
+| Decision | Where | Outcome |
+| --- | --- | --- |
+| Google OAuth scope route | — | Moot. Drive was removed in favour of uploads. |
+| PDF rendering library | [Phase 2](02-uploads.md) | pypdfium2 (Apache-2.0). PyMuPDF is AGPL, and swapping it after it is woven through import, search and the reader is a rewrite. |
+| Where ingestion executes | [Phase 2](02-uploads.md) | A polling worker with an advisory lock. A ZIP of several hundred books cannot be extracted inside a request. |
+| How PDF bytes reach the browser | [Phase 4](04-reader.md) | Django streams and honours `Range`, returning 206. Whether large reads should bypass gunicorn is now a tuning question, not a design one. |
+| Highlight anchoring format | [Phase 5](05-reading-data.md) | Versioned quads in PDF user space. Once highlights exist the coordinates cannot be recomputed — the mapping depended on a viewport that is gone. |
+| The deletion matrix | [Phase 6](06-sharing.md) · `library/lifecycle.py` | The table lives in that module's docstring. The load-bearing choice: un-sharing keeps other readers' annotations, deleting the book does not. |
 
-All six are settled. The two that were open longest — the highlight anchoring
-format and the deletion matrix — are now enforced in code and covered by tests
-(`library/annotations.py` and `library/lifecycle.py`).
-
-## Dependency order
-
-```text
-Phase 1  platform          ✅ built
-   │
-Phase 2  uploads + folders ✅ built — Book + BookSource, which the rest assumes
-   │
-   ├── Phase 3  library    ✅ built — collections, search, virtual views
-   │      │
-   │   Phase 4  reader     needs a book to open
-   │      │
-   │   Phase 5  annotations needs the reader's text layer
-   │      │
-   └── Phase 6  sharing    widens every Phase 3–5 queryset
-          │
-       Phase 7  hardening  proves what the rest claim
-```
-
-Phases 3 and 4 can overlap once Phase 2 lands — the library is mostly backend
-CRUD while the reader is mostly frontend.
-
-## How these documents were written
-
-From the PRD, plus what building Phase 1 exposed. Where the PRD is explicit,
-these repeat it and point at the section. Where it is silent — the reading
-progress conflict rule, the highlight anchoring format, the deletion matrix,
-proxy trust — they make a recommendation and say why, so the choice is
-reviewable rather than accidental.
-
-Open items that do not belong to a single phase are in the README's
-[Known gaps](../../README.md#known-gaps).
+Where the PRD was silent — the progress conflict rule, highlight anchoring, the
+deletion matrix, proxy trust — these documents made a recommendation and said
+why, so the choice is reviewable rather than accidental. Open items that belong
+to no single phase are in the README's [Known gaps](../../README.md#known-gaps).
