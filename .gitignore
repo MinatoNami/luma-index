@@ -24,6 +24,11 @@ htmlcov/
 # Copied from node_modules during the frontend build
 frontend/public/cmaps/
 
+# Playwright leaves traces and reports next to the tests; both are artefacts
+# of a run, and a trace.zip is a megabyte of it.
+frontend/test-results/
+frontend/playwright-report/
+
 # Node / Nuxt
 node_modules/
 .nuxt/
