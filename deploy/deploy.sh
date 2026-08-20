@@ -11,8 +11,13 @@
 #   ./deploy/deploy.sh backup [--db-only] [--prune-library]
 #                                       dump the database and mirror the library
 #                                       to this machine
+#   ./deploy/deploy.sh backup:status    when the last backup ran, and whether
+#                                       the schedule is still doing its job
 #   ./deploy/deploy.sh verify           check every backed-up file against its
 #                                       own name, and every dump against gzip
+#   ./deploy/deploy.sh drill            rehearse a full restore into scratch
+#                                       space, then check catalogue and files
+#                                       still agree
 #   ./deploy/deploy.sh restore <file>   restore the database from a dump
 #   ./deploy/deploy.sh restore:library  send back any files the server is missing
 #   ./deploy/deploy.sh manage <args>    run a Django management command
@@ -429,6 +434,19 @@ backup_root() { printf '%s' "${BACKUP_DIR:-$REPO_ROOT/backups}"; }
 # this compares a computed hash against an expected one, and with no hasher
 # both sides are the empty string. A verification that passes because it could
 # not run is worse than one that fails.
+# macOS bsdtar writes LIBARCHIVE.xattr.* pax headers, which GNU tar in the
+# container warns about once per file — thirty-four warnings for thirty-four
+# books, enough to bury a real error in an unattended log. `--no-xattrs` is the
+# flag that stops it; `--no-mac-metadata` covers AppleDouble sidecars and
+# leaves the xattr headers alone, which is why the obvious guess did nothing.
+# None of that metadata means anything on a Linux volume.
+tar_create() {
+    local dir="$1" list="$2" flags=""
+    tar --no-xattrs -cf /dev/null -T /dev/null 2>/dev/null && flags="--no-xattrs"
+    # shellcheck disable=SC2086
+    COPYFILE_DISABLE=1 tar $flags -C "$dir" -cf - -T "$list"
+}
+
 sha256_of() {
     if command -v sha256sum >/dev/null 2>&1; then
         sha256sum "$1" | awk '{print $1}'
@@ -622,6 +640,49 @@ backup_prune_dumps() {
     dim "Pruned $((count - keep)) old dump(s), keeping $keep."
 }
 
+# How long a backup may be before it stops counting as one. A scheduled job
+# that quietly stopped running looks exactly like one that never ran.
+BACKUP_STALE_DAYS="${BACKUP_STALE_DAYS:-2}"
+
+cmd_backup_status() {
+    local root manifest taken age files
+    root="$(backup_root)"
+    manifest="$root/manifest.txt"
+
+    if [ ! -f "$manifest" ]; then
+        warn "No backup has ever completed in $root."
+        return 1
+    fi
+
+    taken="$(awk '/^taken:/ {print $2}' "$manifest")"
+    files="$(awk '/^library files:/ {print $3}' "$manifest")"
+
+    # The stamp is UTC and basic-format; both date implementations need help.
+    local epoch now
+    if date -j >/dev/null 2>&1; then
+        epoch="$(date -j -u -f '%Y%m%dT%H%M%SZ' "$taken" +%s 2>/dev/null || echo 0)"
+    else
+        epoch="$(date -u -d "${taken:0:8} ${taken:9:2}:${taken:11:2}:${taken:13:2}" +%s 2>/dev/null || echo 0)"
+    fi
+    now="$(date -u +%s)"
+    age=$(( (now - epoch) / 86400 ))
+
+    info "last backup   $taken (${age}d ago)"
+    info "library files $files"
+    info "dumps kept    $(find "$root/db" -name 'lumaindex-*.sql.gz' 2>/dev/null | wc -l | tr -d ' ')"
+
+    if [ "$epoch" = "0" ]; then
+        warn "Could not read the timestamp in $manifest."
+        return 1
+    fi
+    if [ "$age" -gt "$BACKUP_STALE_DAYS" ]; then
+        warn "That is older than $BACKUP_STALE_DAYS day(s). Is the scheduled job still running?
+    Log: ${BACKUP_LOG:-$HOME/Library/Logs/lumaindex-backup.log}"
+        return 1
+    fi
+    ok "Backup is current"
+}
+
 cmd_verify() {
     local root
     root="$(backup_root)"
@@ -675,6 +736,110 @@ cmd_verify() {
     ok "Backup verified"
 }
 
+drill_count() {
+    printf 'select count(*) from %s;\n' "$2" \
+        | rcompose "exec -T postgres sh -c 'psql -tAq -U \"\$POSTGRES_USER\" -d $1'" \
+        | tr -d '\r ' | head -1
+}
+
+cmd_drill() {
+    # A restore you have never performed is a hypothesis. This performs the
+    # whole sequence — dump into a scratch database, mirror into an empty
+    # directory, then check that every book the database knows about has bytes
+    # on disk — and touches nothing that is live.
+    #
+    # That last check is the point. Restoring the two halves separately proves
+    # very little: what matters is whether the catalogue and the files still
+    # agree afterwards.
+    local root latest
+    root="$(backup_root)"
+    latest="$(find "$root/db" -name 'lumaindex-*.sql.gz' | sort | tail -1)"
+    [ -n "$latest" ] || die "No dump in $root/db. Run: ./deploy/deploy.sh backup"
+
+    local scratch_db="lumaindex_drill"
+    local scratch_dir="/data/drill"
+
+    step "Restoring $(basename "$latest") into $scratch_db"
+    rcompose "exec -T postgres sh -c 'dropdb -U \"\$POSTGRES_USER\" --if-exists $scratch_db && createdb -U \"\$POSTGRES_USER\" $scratch_db'"
+    gunzip -c "$latest" | rcompose "exec -T postgres sh -c 'psql -q -v ON_ERROR_STOP=1 -U \"\$POSTGRES_USER\" -d $scratch_db'" >/dev/null
+    ok "Database restored"
+
+    step "Comparing the restored catalogue with the live one"
+    # The live database name is read once, so neither query has to smuggle a
+    # shell variable through ssh, docker and sh. The SQL goes in on stdin for
+    # the same reason: every layer of quoting removed is a layer that cannot
+    # break.
+    local live_db
+    live_db="$(rexec "grep -E '^POSTGRES_DB=' '$DEPLOY_PATH/shared/.env' | cut -d= -f2" | tr -d '\r ')"
+    [ -n "$live_db" ] || die "Could not read POSTGRES_DB from the server's .env."
+
+    local tables="accounts_user library_folder library_book library_booksource library_highlight library_readingprogress"
+    local mismatch=0
+    for table in $tables; do
+        local live drill
+        live="$(drill_count "$live_db" "$table")"
+        drill="$(drill_count "$scratch_db" "$table")"
+        if [ "$live" = "$drill" ]; then
+            info "$(printf '%-28s %s' "$table" "$live")"
+        else
+            warn "$(printf '%-28s live=%s restored=%s' "$table" "$live" "$drill")"
+            mismatch=$((mismatch + 1))
+        fi
+    done
+    [ "$mismatch" = "0" ] || warn "$mismatch table(s) differ. A dump taken while writes were in flight can do that; take a fresh one and repeat before worrying."
+
+    step "Restoring the library into an empty directory"
+    rcompose "exec -T backend sh -c 'rm -rf $scratch_dir && mkdir -p $scratch_dir'"
+    local list count
+    list="$(mktemp)"
+    ( cd "$root/library" && find . -type f -name '*.pdf' ) | sed 's|^\./||' | sort > "$list"
+    count="$(wc -l < "$list" | tr -d ' ')"
+    if [ "$count" = "0" ]; then
+        warn "The mirror is empty, so only the database half was rehearsed."
+    else
+        tar_create "$root/library" "$list" \
+            | rcompose "exec -T backend tar -C $scratch_dir -xf -"
+        ok "Sent $count file(s)"
+    fi
+    rm -f "$list"
+
+    step "Checking the restored catalogue against the restored files"
+    # Every storage key the restored database references must have bytes whose
+    # SHA-256 is its own name. This is what says "the library works", rather
+    # than "the files arrived".
+    local report
+    report="$(rcompose "exec -T backend python manage.py shell -c \"
+import hashlib, pathlib
+from django.db import connections
+root = pathlib.Path('$scratch_dir')
+with connections['default'].cursor() as c:
+    c.execute('select storage_key from library_booksource')
+    keys = [r[0] for r in c.fetchall()]
+missing, corrupt, ok_count = [], [], 0
+for key in set(keys):
+    p = root / key[:2] / key[2:4] / (key + '.pdf')
+    if not p.exists():
+        missing.append(key[:12]); continue
+    if hashlib.sha256(p.read_bytes()).hexdigest() != key:
+        corrupt.append(key[:12]); continue
+    ok_count += 1
+print('KEYS', len(set(keys)), 'OK', ok_count, 'MISSING', len(missing), 'CORRUPT', len(corrupt))
+if missing: print('missing:', missing[:5])
+if corrupt: print('corrupt:', corrupt[:5])
+\"" 2>&1 | grep -E '^(KEYS|missing:|corrupt:)')"
+    printf '    %s\n' "$report"
+
+    step "Cleaning up"
+    rcompose "exec -T postgres sh -c 'dropdb -U \"\$POSTGRES_USER\" --if-exists $scratch_db'"
+    rcompose "exec -T backend sh -c 'rm -rf $scratch_dir'"
+    ok "Scratch database and directory removed"
+
+    case "$report" in
+        *"MISSING 0 CORRUPT 0"*) ok "Drill passed: the catalogue and the files agree" ;;
+        *) die "Drill FAILED — see the counts above. The backup is not yet something to rely on." ;;
+    esac
+}
+
 cmd_restore_library() {
     local root
     root="$(backup_root)"
@@ -702,7 +867,7 @@ cmd_restore_library() {
     info "Sending $n file(s) the server does not have"
     # Additive, never destructive: a file already there has the contents its
     # name says it has, so there is never a reason to overwrite one.
-    tar -C "$root/library" -cf - -T "$missing" \
+    tar_create "$root/library" "$missing" \
         | rcompose "exec -T backend tar -C /data/library -xf -"
 
     ok "Sent $n file(s)"
@@ -780,8 +945,10 @@ main() {
         logs)            cmd_logs "$@" ;;
         rollback)        cmd_rollback "$@" ;;
         backup)          cmd_backup "$@" ;;
+        backup:status)   cmd_backup_status "$@" ;;
         verify)          cmd_verify "$@" ;;
         restore)         cmd_restore "$@" ;;
+        drill)           cmd_drill "$@" ;;
         restore:library) cmd_restore_library "$@" ;;
         manage)          cmd_manage "$@" ;;
         createsuperuser) cmd_createsuperuser "$@" ;;

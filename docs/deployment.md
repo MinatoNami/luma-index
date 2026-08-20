@@ -308,16 +308,36 @@ nobody has checked is a hypothesis.
 
 ### Doing this on a schedule
 
-`deploy.sh` runs from your machine over SSH, so schedule it there. A daily
-entry in `crontab -e`:
+`deploy.sh` runs from your machine over SSH, so schedule it there.
+
+On a Mac use launchd rather than cron: a laptop sleeps, and cron simply misses
+a 03:30 job on a closed lid while launchd runs it on the next wake. There is a
+ready-made agent in the repo:
 
 ```bash
-30 3 * * * cd ~/git-repos/luma-index && ./deploy/deploy.sh backup >> ~/luma-backup.log 2>&1
+sed -e "s|__REPO__|$PWD|g" -e "s|__HOME__|$HOME|g" deploy/backup.launchd.plist \
+  > ~/Library/LaunchAgents/local.lumaindex.backup.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local.lumaindex.backup.plist
 ```
 
-That needs a loaded SSH key, so on macOS add the key to the keychain
-(`ssh-add --apple-use-keychain ~/.ssh/id_ed25519`) or the job will hang waiting
-for a passphrase nobody is there to type.
+It logs to `~/Library/Logs/lumaindex-backup.log`. Remove it with
+`launchctl bootout gui/$(id -u)/local.lumaindex.backup`.
+
+The job needs an SSH key it can use without a prompt — either passphraseless or
+in the keychain (`ssh-add --apple-use-keychain ~/.ssh/id_ed25519`). Check with
+`env -u SSH_AUTH_SOCK ssh -o BatchMode=yes <host> true`: if that works, so will
+the schedule.
+
+### Knowing the schedule is still running
+
+```bash
+./deploy/deploy.sh backup:status
+```
+
+Reports when the last backup completed and how many files it holds, and exits
+non-zero once that is older than `BACKUP_STALE_DAYS` (2). A job that quietly
+stopped running looks exactly like one that never ran, and the manifest is the
+only thing that can tell them apart.
 
 Set `BACKUP_DIR` in `deploy/deploy.env` to put the backup somewhere that is
 itself backed up or synced — an external disk, a NAS mount, a synced folder.
@@ -362,6 +382,22 @@ Finally, drop the scratch database:
 ```bash
 docker compose exec -T postgres sh -c 'dropdb -U "$POSTGRES_USER" restore_drill'
 ```
+
+### Rehearsing the whole thing
+
+```bash
+./deploy/deploy.sh drill
+```
+
+The manual steps below are worth understanding, but this performs the whole
+sequence and cleans up after itself: the newest dump into a scratch database,
+the library mirror into an empty directory, and then the check that matters —
+that every storage key the restored database references has bytes on disk whose
+SHA-256 is its own name.
+
+That last step is the point. Restoring the two halves separately proves very
+little; what you need to know is whether the catalogue and the files still
+agree afterwards. Nothing live is touched, so it is safe to run whenever.
 
 Restoring over the live database, when you actually need to, is
 `./deploy/deploy.sh restore <file>` — which stops the app first and asks for

@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Daily off-server backup, run by launchd on a Mac.
+
+  launchd rather than cron because a laptop sleeps: cron simply misses a 03:30
+  job on a closed lid, while launchd runs it on the next wake. The backup only
+  needs ssh and the usual command-line tools, so PATH is set explicitly rather
+  than inherited from a shell that will not exist.
+
+  Install (substituting the repo path):
+
+    sed "s|__REPO__|$PWD|g" deploy/backup.launchd.plist \
+      > ~/Library/LaunchAgents/local.lumaindex.backup.plist
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local.lumaindex.backup.plist
+
+  Check on it:   ./deploy/deploy.sh backup:status
+  Remove it:     launchctl bootout gui/$(id -u)/local.lumaindex.backup
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>local.lumaindex.backup</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>cd __REPO__ &amp;&amp; ./deploy/deploy.sh backup</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin</string>
+  </dict>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>3</integer>
+    <key>Minute</key><integer>30</integer>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>__HOME__/Library/Logs/lumaindex-backup.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/Library/Logs/lumaindex-backup.log</string>
+
+  <key>RunAtLoad</key>
+  <false/>
+  <key>LowPriorityIO</key>
+  <true/>
+  <key>Nice</key>
+  <integer>5</integer>
+</dict>
+</plist>
