@@ -42,45 +42,88 @@ instance. These are the PRD's non-goals (§42) and remain so.
 
 ## How it works
 
+Four things, one diagram each, because they fail and change independently.
+
+### Getting in
+
 ```text
-                    Your devices, on the tailnet
-                              │
-                              │  https://luma.your-tailnet.ts.net
-                              ▼
-                     ┌─────────────────┐
-                     │ tailscale serve │  terminates TLS with a real
-                     └────────┬────────┘  certificate for the MagicDNS name
-                              │  http, loopback only
-                              ▼
-                     ┌─────────────────┐
-                     │      Caddy      │  one origin, so no CORS and the
-                     └───┬─────────┬───┘  session cookie stays SameSite=Lax
-             /api,/admin │         │ everything else
-                         ▼         ▼
-              ┌──────────────┐  ┌────────┐
-              │ Django + DRF │  │ Nuxt 3 │
-              │              │  │ PDF.js │
-              │ auth         │  └────────┘
-              │ authorization│
-              │ uploads      │
-              │ PDF delivery │
-              └───┬──────┬───┘
-                  │      │
-        ┌─────────▼─┐  ┌─▼──────────────────────────┐
-        │PostgreSQL │  │ library/     uploaded PDFs │ ← canonical, back this up
-        │           │  │ thumbnails/  covers        │ ← regenerable
-        └───────────┘  │ staging/     in-flight     │ ← scratch
-              ▲        └────────────────────────────┘
-              │
-     ┌────────┴────────┐
-     │  ingest worker  │  extracts ZIPs, probes page counts,
-     └─────────────────┘  detects text layers, renders covers
+        your devices, on the tailnet
+                    │
+                    │  https://<name>.ts.net:8443
+                    ▼
+           ┌─────────────────┐
+           │ tailscale serve │   terminates TLS with a real certificate
+           └────────┬────────┘   for the MagicDNS name
+                    │  plain http, 127.0.0.1 only
+                    ▼
+           ┌─────────────────┐
+           │      Caddy      │   one origin, so no CORS and the session
+           └──┬───────────┬──┘   cookie stays SameSite=Lax
+   /api /admin│           │everything else
+              ▼           ▼
+        ┌──────────┐  ┌────────┐
+        │  Django  │  │ Nuxt 3 │
+        │  + DRF   │  │ PDF.js │
+        └──────────┘  └────────┘
 ```
 
 **Nothing is published beyond `127.0.0.1`.** Caddy binds to loopback and
 `tailscale serve` is the only way in, so the app is never exposed to the LAN or
-the internet — while still getting a real TLS certificate, which is what makes
+the internet — while still getting a real certificate, which is what makes
 `Secure` cookies work.
+
+### Where the data sits
+
+```text
+        ┌──────────────┐
+        │ Django + DRF │  auth · authorization · uploads · PDF delivery
+        └───┬──────┬───┘
+            ▼      ▼
+  ┌────────────┐  ┌───────────────────────────────────────────┐
+  │ PostgreSQL │  │ library/     uploaded PDFs     canonical  │ ← back this up
+  │            │  │ thumbnails/  covers            derived    │ ← re-renderable
+  └────────────┘  │ staging/     uploads in flight scratch    │ ← discardable
+                  └───────────────────────────────────────────┘
+```
+
+Only the first two matter for a restore, and only the first cannot be rebuilt.
+Files are addressed by the SHA-256 of their contents, which is what makes the
+backup incremental and its verification free.
+
+### What happens in the background
+
+```text
+  ┌───────────────┐   claims each job with a PostgreSQL advisory lock,
+  │ ingest worker │   so a second worker — or a manual command — is
+  └───────────────┘   safe to run alongside it
+
+    on an upload  ·  extract a ZIP, rebuild its folders
+                  ·  probe page count, detect a text layer
+                  ·  render the cover
+        hourly    ·  delete expired trash (off by default)
+                  ·  drop uploads nobody finished
+```
+
+No Redis and no broker: a polling loop with an advisory lock is what PRD §36
+asks for until an async workload actually justifies more.
+
+### How a file gets in
+
+```text
+  under 16 MB   one multipart POST ─────────────────────────► stored
+  over 16 MB    8 MB chunks ──► staged file ──► assembled ──► stored
+  a .zip        staged ────────► ingest worker ────────────► many books
+```
+
+All three end at the same `store_upload`, so the magic-byte check, the size
+limit, quota accounting and deduplication have no second path to drift out of
+step with. A chunked upload resumes from the server's byte count if the
+connection drops, which on a relayed Tailscale path it does.
+
+A ZIP returns immediately rather than being extracted in the request, because a
+few hundred books would time out. **Archives are treated as hostile**: entries
+that escape the target directory, symlinks, compression bombs, and entries lying
+about their declared size are all rejected before a byte is written.
 
 ### What happens when you open a book
 
@@ -96,29 +139,35 @@ the internet — while still getting a real TLS certificate, which is what makes
 4. Your position is reported as you scroll, debounced, and written to the server
    so another device can pick it up.
 
-### What happens when you upload a ZIP
-
-The request stores the archive and returns immediately; extracting a few hundred
-books would time out. The ingest worker picks it up, validates every entry
-before writing anything, rebuilds the folder structure, and then probes each PDF
-for its page count, whether it has a text layer, and a cover image.
-
-Archives are treated as hostile: entries that escape the target directory,
-symlinks, compression bombs, and entries lying about their size are all rejected
-before a byte is written.
-
 ---
 
 ## Data model
 
+What the library is:
+
 ```text
-Folder ──┐
-         ├── Book ──── BookSource ──── a file in library/
-         │     │
-         │     ├── ReadingProgress ┐
-         │     ├── Bookmark        ├─ one set per reader, private
-         │     ├── Highlight       │
-         │     └── PageNote        ┘
+  User ──┬── Folder ──── Book ──── BookSource ──── a file in library/
+         │                 │
+         │                 └── CollectionBook ──── Collection
+         └── UserSettings
+```
+
+What each reader owns, separately, for the same book:
+
+```text
+  (user, book) ──┬── ReadingProgress   where you got to
+                 ├── Bookmark          a page you marked
+                 ├── Highlight         quad points in PDF user space
+                 ├── PageNote          for scans with no text layer
+                 └── UserBookState     favourite
+```
+
+And three rows that exist only in passing:
+
+```text
+  ChunkedUpload   a large file mid-flight, and how much has arrived
+  UploadBatch     a ZIP waiting for the worker, and what it made of it
+  ShareAudit      who changed a book's visibility, and when
 ```
 
 Three shapes carry the design:
@@ -485,8 +534,9 @@ which the PRD (§36) asks for until an async workload actually justifies more.
 
 ## Documentation
 
-- [docs/deployment.md](docs/deployment.md) — deploying, backups, the restore
-  drill, troubleshooting
+- [docs/deployment.md](docs/deployment.md) — deploying (including onto a host
+  that already runs something else), scheduling backups, rehearsing a restore,
+  putting it on a phone, troubleshooting
 - [docs/phases/](docs/phases/) — the design record for each phase, including the
   six decisions that were expensive to reverse and how each was settled
 - [lumaindex-prd.md](lumaindex-prd.md) — the original specification
