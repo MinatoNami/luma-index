@@ -143,6 +143,20 @@ id where a click position was expected, so `activeHighlightRecord` looked for
 rendered. Clicking a highlight in the sidebar jumped to the page and then did
 nothing at all.
 
+**`color-scheme` follows the chosen theme, not the machine.** It was declared
+once, as `light dark` on bare `:root`, which is right for *follow my system* and
+wrong for the other two — and `color-scheme` is what native controls read, so
+forcing the app light on a machine set to dark left black checkboxes sitting in
+a white page. Two attribute-selector overrides tie them together.
+
+**The theme button toggles against what is on screen.** It used to cycle
+light → dark → system, which meant one press in three changed nothing you could
+see: with the setting on *system* and the machine set to light, the app already
+looked light, so choosing *light* moved the stored value and not a pixel. It
+appeared to need two presses. The decision is now a pure `nextTheme()` in
+`useSettings`, tested directly, and *system* lives in Settings where choosing it
+is deliberate rather than somewhere you land mid-cycle.
+
 **Accessibility is audited, not assumed.** PRD §40 lists seven requirements and
 only contrast had ever been checked. An axe-core pass over every page, at
 desktop and phone width, now comes back clean against WCAG 2.1 AA and 2.2 AA —
@@ -409,7 +423,7 @@ Python.
 | 6 — Sharing | Built |
 | 7 — Hardening | Built |
 
-457 backend tests, including a 64-case object-level permission matrix, and 44
+457 backend tests, including a 64-case object-level permission matrix, and 48
 frontend tests over the logic that has actually broken here — selection
 ranges, cover loading states, sort labels.
 

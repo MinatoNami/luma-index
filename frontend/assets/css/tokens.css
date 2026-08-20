@@ -16,6 +16,12 @@
  */
 
 :root {
+  /* `light dark` means "follow the OS", which is right for theme: system and
+     wrong for the other two. `color-scheme` is what native controls read —
+     checkboxes, selects, scrollbars — and it does not know about data-theme.
+     Forcing the app light on a machine set to dark therefore left black
+     checkboxes sitting in a white page. The two overrides below tie them
+     together. */
   color-scheme: light dark;
 
   /* -- surfaces ---------------------------------------------------------- */
@@ -99,6 +105,10 @@
   /* Large enough to hit reliably with a finger as well as a pointer. */
   --tap-target: 40px;
 }
+
+/* An explicit choice governs the native controls too. */
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
 
 /* Dark: only the tokens that change are redefined, so nothing is defined for
    the first time inside a media query. */

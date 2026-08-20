@@ -78,6 +78,23 @@ export function useSettings() {
 }
 
 /** Apply a stored theme to the document. Shared by the toggle and the page. */
+/**
+ * Which theme a toggle should switch to, given the choice on record and what
+ * the machine prefers.
+ *
+ * Pure, and separate from the button, because this is where the bug was: the
+ * toggle used to cycle light → dark → system, and `system` on a light machine
+ * already *looks* light — so choosing `light` changed the stored value and not
+ * a single pixel. It read as needing two presses. Deciding against the
+ * resolved appearance instead means every press changes something.
+ */
+export function nextTheme(chosen: Theme, systemPrefersDark: boolean): 'light' | 'dark' {
+  const showing = chosen === 'light' || chosen === 'dark'
+    ? chosen
+    : (systemPrefersDark ? 'dark' : 'light')
+  return showing === 'dark' ? 'light' : 'dark'
+}
+
 export function applyTheme(value: Theme) {
   if (!import.meta.client) return
   const root = document.documentElement
