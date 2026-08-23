@@ -13,8 +13,14 @@ services:
       DJANGO_DEBUG: "True"
       DJANGO_SESSION_COOKIE_SECURE: "False"
       DJANGO_CSRF_COOKIE_SECURE: "False"
-      DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1,backend"
-      DJANGO_CSRF_TRUSTED_ORIGINS: "http://localhost:8080"
+      # `caddy` is here for anything driving the app from inside the compose
+      # network — scripts/e2e.sh and scripts/screenshots.sh both use
+      # http://caddy:8080. Without it Django answers 400 to every client-side
+      # API call, while server-rendered content still arrives (Nuxt's SSR
+      # fetches go straight to backend:8000), so the page looks fine and every
+      # cover, folder preview and XHR is quietly rejected.
+      DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1,backend,caddy"
+      DJANGO_CSRF_TRUSTED_ORIGINS: "http://localhost:8080,http://caddy:8080"
       LUMA_REGISTRATION_ENABLED: "True"
       # Only Caddy sits in front of Django locally; there is no tailscale serve.
       LUMA_NUM_PROXIES: "1"
@@ -35,3 +41,13 @@ services:
       - /app/node_modules
       - /app/.nuxt
     command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "3000"]
+    # The Dockerfile's HEALTHCHECK belongs to the `runtime` stage; this builds
+    # `build`, which has none — and caddy waits on frontend health, so without
+    # one declared here caddy never starts and nothing answers on 8080. The
+    # start period is generous because the dev server compiles on first request.
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 90s

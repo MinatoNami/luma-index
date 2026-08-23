@@ -98,6 +98,16 @@ fi
 # still streaming. Long uploads and long PDF downloads then cost a thread
 # rather than a whole process, which is also the answer to holding a worker
 # open for the length of a download.
+# An explicit command replaces the server rather than adding to it. The dev
+# override's `runserver`, and `docker compose run backend python -m pytest`,
+# both arrive here as arguments; appending them to gunicorn's own flags fails
+# with "unrecognized arguments" *after* every check above has passed, so the
+# container looks like it started and then died for an unrelated reason.
+if [ "$#" -gt 0 ]; then
+    log "running: $*"
+    exec "$@"
+fi
+
 log "starting gunicorn with ${GUNICORN_WORKERS:-3} workers x ${GUNICORN_THREADS:-4} threads"
 exec gunicorn config.wsgi:application \
     --bind 0.0.0.0:8000 \
@@ -108,5 +118,4 @@ exec gunicorn config.wsgi:application \
     --graceful-timeout 30 \
     --access-logfile - \
     --error-logfile - \
-    --access-logformat '{"ts":"%(t)s","level":"INFO","logger":"gunicorn.access","message":"%(r)s","status":%(s)s,"bytes":%(b)s,"duration_ms":%(M)s}' \
-    "$@"
+    --access-logformat '{"ts":"%(t)s","level":"INFO","logger":"gunicorn.access","message":"%(r)s","status":%(s)s,"bytes":%(b)s,"duration_ms":%(M)s}'
