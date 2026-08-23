@@ -19,6 +19,11 @@ them read shared ones. One `UserBookState`, unique on `(user, book)`, holds the
 small flags. Reading progress stays separate: it is written constantly and read
 differently.
 
+What shipped is narrower than that: `UserBookState` carries `is_favourite` and
+nothing else, and `last_opened_at` lives on `ReadingProgress`. `Collection` keys
+on `owner` rather than `user`, and neither it nor `CollectionBook` has the
+`position` column this document proposed — collection ordering was never built.
+
 **Search is `icontains` over title.** Honest for a few thousand books and needs
 no extra machinery. A `pg_trgm` GIN index adds fuzzy matching for one
 migration's cost when the library gets big enough to notice; it has not.
@@ -44,6 +49,11 @@ PRD §12 lists six. None is a stored collection:
 
 They are a filter parameter, not fake collection ids — otherwise every
 collection endpoint grows special cases for six magic values.
+
+Three of them shipped that way (`?view=favourites`, `recent`, `unsorted`).
+Continue Reading and Shared With Me became endpoints of their own instead
+(`/continue-reading/`, `/shared/`), and Recently Opened was never built, since
+nothing records a per-book open time separately from progress.
 
 ## Rules that carried
 
