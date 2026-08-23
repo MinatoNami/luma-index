@@ -1,12 +1,19 @@
-# Secrets — never commit
+# Secrets — never commit.
+#
+# Matched anywhere in the tree, not just where they are expected today: a
+# secret in a directory these patterns did not anticipate is the failure that
+# actually happens, and this repository is public.
 .env
 .env.*
 !.env.example
-deploy/deploy.env
-deploy/*.env
-!deploy/deploy.env.example
+*.env
+!*.env.example
 *.pem
 *.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
 !**/id_*.pub
 
 # Python

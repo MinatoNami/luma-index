@@ -29,8 +29,8 @@ set -euo pipefail
 #   2. sudo mkdir -p $DEPLOY_PATH/{releases,shared,backups} && chown it to that user
 #   3. tailscale serve --bg --https=<free port> http://127.0.0.1:8080
 #
-# That is exactly how alena-server was set up, where nginx already owned 443
-# and four unrelated containers had been up for weeks.
+# That is exactly how this instance's own host was set up, where nginx already
+# owned 443 and four unrelated containers had been up for weeks.
 
 DEPLOY_PATH="${DEPLOY_PATH:-/opt/lumaindex}"
 DEPLOY_USER="${DEPLOY_USER:-ubuntu}"
