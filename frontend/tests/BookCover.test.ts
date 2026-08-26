@@ -129,3 +129,55 @@ describe('when the cover is replaced', () => {
     expect(w.find('img').classes()).not.toContain('loaded')
   })
 })
+
+describe('how far in you are', () => {
+  const started = (percentage: number, page = 0) =>
+    book({ progress: { page, page_fraction: 0, percentage, last_opened_at: null } })
+
+  it('draws a bar across the cover once a book has been opened', () => {
+    const w = mount(BookCover, {
+      props: { book: started(33, 30) },
+      global: { stubs: { AppIcon: true } },
+    })
+
+    const bar = w.find('.progress')
+    expect(bar.exists()).toBe(true)
+    expect(bar.attributes('aria-valuenow')).toBe('33')
+    expect(w.find('.read').attributes('style')).toContain('width: 33%')
+  })
+
+  it('says nothing about a book nobody has opened', () => {
+    expect(mountCover(book()).find('.progress').exists()).toBe(false)
+    expect(mountCover(started(0)).find('.progress').exists()).toBe(false)
+  })
+
+  it('keeps a full bar on a finished book, because that is information too', () => {
+    const w = mount(BookCover, {
+      props: { book: started(100) },
+      global: { stubs: { AppIcon: true } },
+    })
+    expect(w.find('.read').attributes('style')).toContain('width: 100%')
+  })
+
+  it('leaves a thumbnail alone: 28px has no room for a bar', () => {
+    const w = mount(BookCover, {
+      props: { book: started(50), size: 'sm' },
+      global: { stubs: { AppIcon: true } },
+    })
+    expect(w.find('.progress').exists()).toBe(false)
+  })
+
+  it('clamps a percentage the server should never send but might', () => {
+    const over = mount(BookCover, {
+      props: { book: started(140) },
+      global: { stubs: { AppIcon: true } },
+    })
+    expect(over.find('.read').attributes('style')).toContain('width: 100%')
+
+    const under = mount(BookCover, {
+      props: { book: started(-10) },
+      global: { stubs: { AppIcon: true } },
+    })
+    expect(under.find('.progress').exists()).toBe(false)
+  })
+})

@@ -774,56 +774,70 @@ function itemLabel(folder: Folder): string {
       </div>
 
       <!-- Grid and large icons ----------------------------------------- -->
-      <div v-else :class="['cards', view]">
-        <div v-for="folder in folders" :key="`f${folder.id}`"
-             class="card folder-card panel"
-             :style="{ order: filesFirst ? 2 : 1 }"
-             :class="{ 'drop-into': dropTarget === folder.id,
-                       'is-selected': selection.has('folder', folder.id) }" draggable="true"
-             @dragstart="onRowDragStart($event, 'folder', folder.id)" @dragend="onRowDragEnd"
-             @dragover="onFolderDragOver($event, folder)"
-             @dragleave="dropTarget = 'none'" @drop="onFolderDrop($event, folder)">
-          <label class="card-pick" :class="{ on: selection.has('folder', folder.id) }"
-                 @click.stop>
-            <input type="checkbox" :checked="selection.has('folder', folder.id)"
-                   :aria-label="`Select ${folder.name}`"
-                   @change="selection.toggle('folder', folder.id)" />
-          </label>
-          <button class="card-open" type="button"
-                  @click="rowClick('folder', folder.id, $event, () => open(folder))">
-            <FolderCover :folder="folder" :size="view === 'large' ? 'lg' : 'md'" />
-            <span class="card-title">{{ folder.name }}</span>
-            <span class="card-meta tertiary">{{ itemLabel(folder) }}</span>
-          </button>
-          <RowMenu class="card-menu" :actions="folderActions(folder)"
-                   :label="`Actions for ${folder.name}`" />
+      <div v-else class="listing">
+        <!-- Two bands rather than one grid: a folder is a different kind
+             of thing from a book, and interleaving them left the rows
+             ragged. Sorting by type swaps the bands over. -->
+        <div v-if="folders.length" class="folders"
+             :style="{ order: filesFirst ? 2 : 1 }">
+          <div v-for="folder in folders" :key="`f${folder.id}`"
+               class="card folder-card panel"
+               :class="{ 'drop-into': dropTarget === folder.id,
+                         'is-selected': selection.has('folder', folder.id) }" draggable="true"
+               @dragstart="onRowDragStart($event, 'folder', folder.id)" @dragend="onRowDragEnd"
+               @dragover="onFolderDragOver($event, folder)"
+               @dragleave="dropTarget = 'none'" @drop="onFolderDrop($event, folder)">
+            <label class="card-pick" :class="{ on: selection.has('folder', folder.id) }"
+                   @click.stop>
+              <input type="checkbox" :checked="selection.has('folder', folder.id)"
+                     :aria-label="`Select ${folder.name}`"
+                     @change="selection.toggle('folder', folder.id)" />
+            </label>
+            <button class="card-open" type="button"
+                    @click="rowClick('folder', folder.id, $event, () => open(folder))">
+              <FolderCover :folder="folder" size="sm" />
+              <span class="card-body">
+                <span class="card-title">{{ folder.name }}</span>
+                <span class="card-meta tertiary">{{ itemLabel(folder) }}</span>
+              </span>
+            </button>
+            <RowMenu class="card-menu" :actions="folderActions(folder)"
+                     :label="`Actions for ${folder.name}`" />
+          </div>
         </div>
-        <div v-for="book in books" :key="`b${book.id}`" class="card panel"
-             :style="{ order: filesFirst ? 1 : 2 }"
-             :class="{ 'is-selected': selection.has('book', book.id) }" draggable="true"
-             @dragstart="onRowDragStart($event, 'book', book.id)" @dragend="onRowDragEnd">
-          <label class="card-pick" :class="{ on: selection.has('book', book.id) }" @click.stop>
-            <input type="checkbox" :checked="selection.has('book', book.id)"
-                   :aria-label="`Select ${book.title}`"
-                   @change="selection.toggle('book', book.id)" />
-          </label>
-          <NuxtLink class="card-open" :to="bookHref(book)"
-                    @click="rowClick('book', book.id, $event)">
-            <BookCover :book="book" :size="view === 'large' ? 'lg' : 'md'" />
-            <span class="card-title">{{ book.title }}</span>
-            <span class="card-meta tertiary">
-              {{ book.page_count ? `${book.page_count} pages` : 'Preparing…' }}
-              <template v-if="book.source"> · {{ formatBytes(book.source.file_size) }}</template>
-            </span>
-          </NuxtLink>
-          <button class="star card-star" type="button" :class="{ on: book.is_favourite }"
-                  :title="book.is_favourite ? 'Remove from favourites' : 'Add to favourites'"
-                  :aria-pressed="book.is_favourite"
-                  @click.stop.prevent="toggleFavourite(book)">
-            <AppIcon :name="book.is_favourite ? 'star-filled' : 'star'" :size="16" />
-          </button>
-          <RowMenu class="card-menu" :actions="bookActions(book)"
-                   :label="`Actions for ${book.title}`" />
+
+        <div v-if="books.length" :class="['cards', view]"
+             :style="{ order: filesFirst ? 1 : 2 }">
+          <div v-for="book in books" :key="`b${book.id}`" class="card panel"
+               :class="{ 'is-selected': selection.has('book', book.id) }" draggable="true"
+               @dragstart="onRowDragStart($event, 'book', book.id)" @dragend="onRowDragEnd">
+            <label class="card-pick" :class="{ on: selection.has('book', book.id) }" @click.stop>
+              <input type="checkbox" :checked="selection.has('book', book.id)"
+                     :aria-label="`Select ${book.title}`"
+                     @change="selection.toggle('book', book.id)" />
+            </label>
+            <NuxtLink class="card-open" :to="bookHref(book)"
+                      @click="rowClick('book', book.id, $event)">
+              <BookCover :book="book" :size="view === 'large' ? 'lg' : 'md'" />
+              <span class="card-title">{{ book.title }}</span>
+              <span v-if="book.progress" class="card-meta reading">
+                {{ Math.round(book.progress.percentage) }}%<template v-if="book.page_count">
+                  · page {{ book.progress.page + 1 }} of {{ book.page_count }}</template>
+              </span>
+              <span v-else class="card-meta tertiary">
+                {{ book.page_count ? `${book.page_count} pages` : 'Preparing…' }}
+                <template v-if="book.source"> · {{ formatBytes(book.source.file_size) }}</template>
+              </span>
+            </NuxtLink>
+            <button class="star card-star" type="button" :class="{ on: book.is_favourite }"
+                    :title="book.is_favourite ? 'Remove from favourites' : 'Add to favourites'"
+                    :aria-pressed="book.is_favourite"
+                    @click.stop.prevent="toggleFavourite(book)">
+              <AppIcon :name="book.is_favourite ? 'star-filled' : 'star'" :size="16" />
+            </button>
+            <RowMenu class="card-menu" :actions="bookActions(book)"
+                     :label="`Actions for ${book.title}`" />
+          </div>
         </div>
       </div>
 
@@ -1013,6 +1027,23 @@ function itemLabel(folder: Folder): string {
 .cards > .card { max-width: 320px; }
 .card { position: relative; padding: var(--space-3); transition: box-shadow var(--duration) var(--ease); }
 .card:hover { box-shadow: var(--shadow-md); }
+.listing { display: flex; flex-direction: column; gap: var(--space-5); }
+
+/* Wider and shorter than a cover, sized so a desktop shows four across. */
+.folders {
+  display: grid; gap: var(--space-3);
+  grid-template-columns: repeat(auto-fill, minmax(232px, 1fr));
+}
+
+/* A folder is not a book, so it stops being book-shaped: the mosaic sits
+   beside the name instead of standing in for a cover. */
+.folder-card { align-self: start; }
+.folder-card .card-open { display: flex; align-items: center; gap: var(--space-3); }
+.folder-card .card-body { min-width: 0; display: grid; gap: 2px; text-align: left; }
+
+/* Where you got to reads as progress, not as metadata. */
+.card-meta.reading { color: var(--accent-text); }
+
 .card-open {
   display: grid; gap: var(--space-2); width: 100%;
   background: none; border: 0; padding: 0; text-align: left;
@@ -1026,7 +1057,14 @@ function itemLabel(folder: Folder): string {
 .card-meta { font-size: var(--text-xs); }
 .card-menu { position: absolute; top: var(--space-2); right: var(--space-2);
              background: var(--surface); border-radius: var(--radius-sm); }
-.folder-card .card-open { align-content: start; }
+/* In a row the checkbox and the menu sit in the row, not on top of it. They
+   were absolutely positioned for a card whose cover filled it; here the mosaic
+   is in the top-left corner the checkbox was claiming, and on a phone — where
+   selection is always visible rather than revealed on hover — it covered it. */
+.folder-card { display: flex; align-items: center; gap: var(--space-2); }
+.folder-card .card-pick,
+.folder-card .card-menu { position: static; flex: none; }
+.folder-card .card-open { flex: 1; min-width: 0; align-content: start; }
 
 /* -- skeleton ----------------------------------------------------------- */
 .skeleton { pointer-events: none; }
