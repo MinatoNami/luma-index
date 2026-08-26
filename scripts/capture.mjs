@@ -113,7 +113,11 @@ await small.goto(`${BASE}/library`, { waitUntil: 'networkidle' })
 await themeApplied(small)
 await clickIfPresent(small, 'Grid')
 await imagesSettled(small)
-await shot(small, 'phone', 390)
+// The full viewport, not the content box: the tab bar is sticky to the
+// bottom of the window, so cropping to content height leaves it out of frame —
+// and it is the whole point of the phone layout.
+await small.screenshot({ path: `${OUT}/phone.png`, clip: { x: 0, y: 0, width: 390, height: 844 } })
+console.log('  wrote phone.png (390x844, full viewport)')
 await phone.close()
 
 await browser.close()
