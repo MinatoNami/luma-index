@@ -137,6 +137,8 @@ const barOverflow = computed(() => {
       run: () => { mode.value = mode.value === 'continuous' ? 'single' : 'continuous' } },
     { label: fit.value === 'fit-width' ? 'Fit page' : 'Fit width', icon: 'search',
       run: () => { fit.value = fit.value === 'fit-width' ? 'fit-page' : 'fit-width' } },
+    { label: 'Zoom in', icon: 'search', run: zoomIn },
+    { label: 'Zoom out', icon: 'search', run: zoomOut },
     { label: 'Fullscreen', icon: 'large-view', run: fullscreen },
     { label: 'About this book', icon: 'collection',
       run: () => navigateTo(`/books/${bookId.value}/details`) },
@@ -375,7 +377,8 @@ useHead({ title: computed(() => book.value ? `${book.value.title} — LumaIndex`
           <AppIcon name="chevron-right" :size="16" class="flip" />
           <span class="sr-only">Back to library</span>
         </NuxtLink>
-        <AppButton v-if="outline.length" variant="ghost" size="sm" icon-only icon="list-view" class="panel-toggle"
+        <AppButton v-if="outline.length" variant="ghost" size="sm" icon-only icon="list-view"
+                   class="panel-toggle contents-toggle"
                    :title="sidebar ? 'Hide contents' : 'Show contents'"
                    @click="sidebar = !sidebar; thumbnails = false" />
         <AppButton variant="ghost" size="sm" icon-only icon="grid-view" class="panel-toggle"
@@ -388,43 +391,31 @@ useHead({ title: computed(() => book.value ? `${book.value.title} — LumaIndex`
       </div>
 
       <div class="middle">
-        <AppButton variant="ghost" size="sm" icon-only icon="arrow-up" title="Previous page"
-                   class="flip-up" @click="reader?.previous()" />
+        <AppButton v-if="mode === 'single'" variant="ghost" size="sm" icon-only icon="arrow-up"
+                   title="Previous page" class="flip-up" @click="reader?.previous()" />
         <form class="jump" @submit.prevent="submitJump">
           <input v-model="jumpTo" type="text" inputmode="numeric"
                  :placeholder="String(page)" aria-label="Jump to page" />
           <span class="of">/ {{ totalPages || '…' }}</span>
         </form>
-        <AppButton variant="ghost" size="sm" icon-only icon="arrow-up" title="Next page"
-                   class="flip-down" @click="reader?.next()" />
+        <AppButton v-if="mode === 'single'" variant="ghost" size="sm" icon-only icon="arrow-up"
+                   title="Next page" class="flip-down" @click="reader?.next()" />
         <span class="pct tertiary">{{ percentage }}%</span>
-        <AppButton variant="ghost" size="sm" icon-only
-                   :icon="currentBookmark ? 'check' : 'file'"
-                   class="bookmark-toggle" :class="{ bookmarked: currentBookmark }"
-                   :title="currentBookmark ? 'Remove bookmark' : 'Bookmark this page'"
-                   @click="toggleBookmark" />
       </div>
 
       <div class="right">
         <AppButton v-if="book?.has_text_layer !== false" variant="ghost" size="sm" icon-only
                    icon="search" title="Find in book (⌘F)" @click="toggleSearch" />
-        <AppButton class="zoom" variant="ghost" size="sm" :title="'Zoom out'"
-                   @click="zoomOut">−</AppButton>
-        <AppButton class="zoom" variant="ghost" size="sm"
-                   :title="fit === 'fit-width' ? 'Fit page' : 'Fit width'"
-                   @click="fit = fit === 'fit-width' ? 'fit-page' : 'fit-width'">
-          {{ fit === 'fit-page' ? 'Fit page' : 'Fit width' }}
-        </AppButton>
-        <AppButton class="zoom" variant="ghost" size="sm" :title="'Zoom in'"
-                   @click="zoomIn">+</AppButton>
         <AppButton class="mode-toggle" variant="ghost" size="sm"
                    :title="mode === 'continuous' ? 'Single page' : 'Continuous scroll'"
                    @click="mode = mode === 'continuous' ? 'single' : 'continuous'">
           {{ mode === 'continuous' ? 'Scroll' : 'Page' }}
         </AppButton>
-        <AppButton variant="ghost" size="sm" icon-only icon="large-view" class="fullscreen" title="Fullscreen"
-                   @click="fullscreen" />
         <RowMenu class="bar-overflow" :actions="barOverflow" label="More reader controls" />
+      </div>
+
+      <div class="bar-progress" aria-hidden="true">
+        <div class="bar-read" :style="{ width: `${percentage}%` }" />
       </div>
     </header>
 
@@ -603,6 +594,8 @@ useHead({ title: computed(() => book.value ? `${book.value.title} — LumaIndex`
 .reader-shell.chrome-hidden { background: var(--surface-sunken); }
 .bar {
   display: flex; align-items: center; gap: var(--space-3);
+  /* The progress line is absolutely positioned against this. */
+  position: relative;
   /* Collapsed rather than translated, so the reading area actually grows —
      sliding it out of view would leave behind the gap it used to fill. */
   max-height: 6rem; overflow: hidden;
@@ -753,21 +746,30 @@ h1 { font-size: var(--text-base); font-weight: 500; margin: 0;
 }
 
 /* Above this the menu is redundant — every control is already in the bar. */
-.bar-overflow { display: none; }
+/* Always, not just on a phone: the bar carried fifteen controls at every
+   width, and the ones that left it are the ones you reach for rarely. */
+.bar-overflow { display: block; }
+
+/* A line rather than a widget: it says how far through you are and costs no
+   width in a bar that had too little of it. */
+.bar-progress {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  height: 2px; background: var(--surface-sunken);
+}
+.bar-read { height: 100%; background: var(--accent); }
 
 @media (max-width: 30rem) {
-  .bar-overflow { display: block; }
-  /* Everything the menu now carries. Back, find and the page arrows stay in
-     the bar, which is five controls rather than nine. */
-  .zoom, .mode-toggle, .fullscreen,
-  .panel-toggle, .bookmark-toggle { display: none; }
+  /* What is left to drop on a phone. Zoom, fit, fullscreen, contents and the
+     bookmark left the bar at every width; these are the rest. */
+  .mode-toggle, .panel-toggle { display: none; }
   /* The title stays: it is the one thing here that says which book this is,
      and it already truncates. */
   /* Typing a page number and reading a percentage are the two things a phone
      can most afford to lose, and together they were 140px of a 375px bar —
      enough that the back button and the panel toggles were being crushed to
-     16px, well under a usable touch target. Arrows and the contents panel
-     still navigate. */
+     16px, well under a usable touch target. Scrolling turns the page, the
+     line under the bar still says how far through you are, and the menu
+     carries everything else. */
   .jump, .pct { display: none; }
   .bar { gap: var(--space-1); }
   /* `.left` is flex:1 with min-width:0 so the book title can truncate, and its

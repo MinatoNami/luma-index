@@ -86,6 +86,16 @@ await clickIfPresent(page, 'Grid')
 await imagesSettled(page)
 await shot(page, 'library', 1440)
 
+// The reader, with a page actually painted.
+await page.goto(`${BASE}/books/${process.env.BOOK_ID}`, { waitUntil: 'networkidle' })
+await page.waitForTimeout(3500)
+// Opening a book restores where you were, which scrolls, which hides the bar.
+// Photographing the chrome means putting it back first.
+await page.locator('.viewport').evaluate((el) => { el.scrollTop = 0 })
+await page.waitForTimeout(900)
+await page.screenshot({ path: `${OUT}/reader.png`, clip: { x: 0, y: 0, width: 1440, height: 900 } })
+console.log('  wrote reader.png')
+
 // One book on a page of its own.
 await page.goto(`${BASE}/books/${process.env.BOOK_ID}/details`, { waitUntil: 'networkidle' })
 await themeApplied(page)

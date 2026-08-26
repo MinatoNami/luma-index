@@ -54,6 +54,11 @@ How far into a book you are rides on its cover, where you are already looking.
 A book has a page of its own now, reached from a row menu or from the reader —
 never in front of opening one, because reading is the fast path.
 
+![The reader](docs/screenshots/reader.png)
+
+The reader's bar carries seven controls where it carried fifteen; the rest are
+in one menu, and a line under the bar says how far through the book you are.
+
 <img src="docs/screenshots/phone.png" alt="The library on a phone" width="360">
 
 On a narrow screen the top bar's labels give way to icons, and selection is
