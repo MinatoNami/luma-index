@@ -94,8 +94,10 @@ def test_books_sort_by_when_they_were_added(api, user):
     a_book(user, "Old", added=at(30))
     a_book(user, "New", added=at(1))
 
-    assert names(api.get(reverse("library:books"), {"sort": "added"}).json()["results"]) == ["Old", "New"]
-    assert names(api.get(reverse("library:books"), {"sort": "-added"}).json()["results"]) == ["New", "Old"]
+    assert names(api.get(reverse("library:books"),
+                         {"sort": "added"}).json()["results"]) == ["Old", "New"]
+    assert names(api.get(reverse("library:books"),
+                         {"sort": "-added"}).json()["results"]) == ["New", "Old"]
 
 
 @pytest.mark.django_db
@@ -103,7 +105,8 @@ def test_books_sort_by_size(api, user):
     a_book(user, "Small", size=10)
     a_book(user, "Large", size=9000)
 
-    assert names(api.get(reverse("library:books"), {"sort": "-size"}).json()["results"]) == ["Large", "Small"]
+    assert names(api.get(reverse("library:books"),
+                         {"sort": "-size"}).json()["results"]) == ["Large", "Small"]
 
 
 @pytest.mark.django_db
