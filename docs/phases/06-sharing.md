@@ -34,7 +34,10 @@ def can_read(user, book) -> bool:
     return book.owner_id == user.id or book.visibility == Book.Visibility.SHARED
 ```
 
-Every content, thumbnail, metadata and annotation path calls it.
+Every content, thumbnail, metadata and annotation path calls it. What was built
+adds two rules this sketch omits: an unauthenticated caller is refused outright,
+and **a trashed book is invisible even to people it was shared with** — only its
+owner can see it, and only in their trash. See `library/permissions.py`.
 
 **Owner-only fields stay owner-only.** The original filename and folder path
 describe the owner's organisation, not the book, and a non-owner has no business

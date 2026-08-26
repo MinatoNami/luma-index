@@ -20,7 +20,16 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 step() { printf '\033[34m==>\033[0m \033[1m%s\033[0m\n' "$*"; }
 die()  { printf '\033[31m ✗ \033[0m %s\n' "$*" >&2; exit 1; }
 
-compose() { docker compose "$@"; }
+# Which stack to drive. The suite opens a real book in a real browser, so point
+# it at a scratch project seeded by scripts/demo_library.py rather than at
+# somebody's actual library:
+#
+#   COMPOSE_PROJECT=lumaindex-demo ./scripts/e2e.sh
+PROJECT="${COMPOSE_PROJECT:-}"
+compose() {
+    if [ -n "$PROJECT" ]; then docker compose -p "$PROJECT" "$@"
+    else docker compose "$@"; fi
+}
 
 step "Checking the stack is up"
 compose ps --format '{{.Service}} {{.Status}}' | grep -q "caddy.*healthy" \

@@ -19,7 +19,7 @@ an absent file.
 | `GET /books/{id}/` | 200 | 404 | 200 | **404** |
 | `GET /books/{id}/content` | 200 | 404 | 200 | **404** |
 | `GET /books/{id}/thumbnail` | 200 | 404 | 200 | **404** |
-| `PATCH /books/{id}/` | 200 | 404 | 403 | **404** |
+| `PATCH /books/{id}/` | 200 | 404 | **404** | **404** |
 | `GET /books/{id}/progress` | own | own | own | own |
 | `GET /books/{id}/highlights` | own only | own only | own only | **own only** |
 | `POST /books/{id}/bookmarks` | 201 | 404 | 201 | **404** |
@@ -31,6 +31,11 @@ Two deliberate choices in that table:
 - **Admin gets nothing extra.** §8: admin status must not automatically expose
   private annotations through the normal UI. Instance management happens in
   Django Admin, a separate and audited path.
+
+Writing to a shared book you do not own is 404 rather than 403 for the same
+reason — readable is not writable, and saying "forbidden" would confirm which
+of a hundred ids exist. The suite also covers anonymous requests (403 or 404,
+never served) and the same ownership rules on folders.
 
 ## What is enforced
 

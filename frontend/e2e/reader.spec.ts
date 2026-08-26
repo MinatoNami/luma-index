@@ -73,7 +73,7 @@ test.beforeEach(async ({ page, bookId }) => {
  * in is the valuable part: real Chromium, real rAF, the one environment where
  * these bugs live.
  */
-test.fixme('renders a page onto a canvas', async ({ page }) => {
+test('renders a page onto a canvas', async ({ page }) => {
   const painted = await paintedCanvases(page)
   expect(painted).toBeGreaterThan(0)
 
@@ -105,9 +105,27 @@ test('keeps a bounded number of canvases while scrolling the whole book', async 
   expect(painted, `canvases painted after scrolling the book: ${painted}`).toBeLessThanOrEqual(12)
 })
 
-test.fixme('single-page mode still shows a page after using the arrows', async ({ page }) => {
+/**
+ * Bring the toolbar back before clicking anything on it.
+ *
+ * Opening a book restores saved reading progress, which scrolls the viewport,
+ * which hides the bar — so a test that clicks a toolbar button straight after
+ * load is clicking at a point PDF.js's .textLayer now owns, and Playwright
+ * fails it as "intercepts pointer events" rather than as anything to do with
+ * the button.
+ */
+async function revealToolbar(page: import('@playwright/test').Page) {
+  const viewport = page.locator('.viewport')
+  await viewport.evaluate((el) => { el.scrollTop = Math.max(0, el.scrollTop - 400) })
+  await page.waitForTimeout(200)
+  await viewport.evaluate((el) => { el.scrollTop = 0 })
+  await expect(page.locator('.bar')).not.toHaveClass(/hidden/)
+}
+
+test('single-page mode still shows a page after using the arrows', async ({ page }) => {
   // This went blank: the render was kicked off before Vue had created the
   // replacement element, and a stale entry made the page unrenderable for good.
+  await revealToolbar(page)
   await page.locator('.mode-toggle').click()
   await expect(page.locator('.mode-toggle')).toHaveAttribute('title', 'Continuous scroll')
   await expect.poll(() => paintedCanvases(page), { timeout: 30_000 }).toBeGreaterThan(0)
@@ -120,7 +138,7 @@ test.fixme('single-page mode still shows a page after using the arrows', async (
   }
 })
 
-test.fixme('the toolbar gets out of the way and comes back', async ({ page }) => {
+test('the toolbar gets out of the way and comes back', async ({ page }) => {
   const room = await scrollableBy(page)
   test.skip(room < 1000, `this book only scrolls ${room}px — the bar has nowhere to hide`)
 
@@ -144,13 +162,14 @@ test.fixme('the toolbar gets out of the way and comes back', async ({ page }) =>
   await expect(bar).not.toHaveClass(/hidden/)
 })
 
-test.fixme('search finds text in the book', async ({ page, bookId }) => {
+test('search finds text in the book', async ({ page, bookId }) => {
   const scanned = await page.evaluate(async (id) => {
     const r = await fetch(`/api/library/books/${id}/`, { credentials: 'include' })
     return (await r.json()).has_text_layer === false
   }, bookId)
   test.skip(scanned, 'this book has no text layer, so there is nothing to find')
 
+  await revealToolbar(page)
   await page.getByTitle(/find in book/i).click()
   const input = page.getByPlaceholder(/find in book/i)
   await input.fill('the')

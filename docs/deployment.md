@@ -323,12 +323,14 @@ ended with `exec gunicorn "$@"`, which turned the command into gunicorn flags
 and killed the container after every check had logged success.
 
 ```bash
-./scripts/e2e.sh
+COMPOSE_PROJECT=lumaindex-demo ./scripts/e2e.sh
 ```
 
 The e2e run needs a real browser: PDF.js drives rendering with
 `requestAnimationFrame`, which never fires where `visibilityState` is `hidden`,
-so headless preview panes render nothing at all.
+so headless preview panes render nothing at all. It also opens a real book from
+whichever stack it is pointed at, so point it at a scratch project seeded by
+`scripts/demo_library.py` rather than at a real library.
 
 ## Troubleshooting
 
