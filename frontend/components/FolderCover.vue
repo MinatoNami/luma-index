@@ -13,7 +13,7 @@ import type { Folder } from '~/composables/useLibrary'
  * the alternative is a per-tile shimmer, and a shimmer whose load event goes
  * missing is the bug that has already been fixed twice in BookCover.
  */
-const props = withDefaults(defineProps<{ folder: Folder; size?: 'md' | 'lg' }>(), {
+const props = withDefaults(defineProps<{ folder: Folder; size?: 'sm' | 'md' | 'lg' }>(), {
   size: 'md',
 })
 
@@ -42,7 +42,7 @@ watch(() => props.folder.preview_book_ids, () => { failed.value = [] })
 
 <template>
   <div :class="['folder-cover', props.size, { 'is-empty': empty }]">
-    <AppIcon v-if="empty" name="folder" :size="props.size === 'lg' ? 34 : 26" />
+    <AppIcon v-if="empty" name="folder" :size="props.size === 'lg' ? 34 : props.size === 'sm' ? 18 : 26" />
     <div v-else class="mosaic" aria-hidden="true">
       <span v-for="(id, index) in cells" :key="index" class="tile">
         <img v-if="id !== null" :src="`/api/library/books/${id}/thumbnail`" alt=""
@@ -67,6 +67,12 @@ watch(() => props.folder.preview_book_ids, () => { failed.value = [] })
   color: var(--accent-text);
   overflow: hidden;
 }
+
+/* Beside a name in a row, not standing in for a book cover. Square, because a
+   page-shaped folder is what made a folder read as a book in the grid. */
+.sm { width: 44px; aspect-ratio: 1; border-radius: var(--radius-sm); }
+.sm .mosaic { gap: 2px; padding: 3px; }
+.sm .corner { display: none; }
 
 .mosaic {
   display: grid;

@@ -181,6 +181,18 @@ class SharedBookSerializer(serializers.ModelSerializer):
                 "percentage": record.percentage, "last_opened_at": record.last_opened_at}
 
 
+class CollectionRefSerializer(serializers.Serializer):
+    """Just enough of a collection to link to it."""
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+
+
+class AnnotationCountsSerializer(serializers.Serializer):
+    bookmarks = serializers.IntegerField()
+    highlights = serializers.IntegerField()
+    notes = serializers.IntegerField()
+
+
 class BookSerializer(serializers.ModelSerializer):
     source = BookSourceSerializer(read_only=True)
     path = serializers.CharField(read_only=True)
@@ -234,6 +246,48 @@ class BookSerializer(serializers.ModelSerializer):
         if value.owner_id != request.user.pk or value.deleted_at is not None:
             raise serializers.ValidationError("No such folder.")
         return value
+
+
+class BookDetailSerializer(BookSerializer):
+    """One book on a page of its own, for the person who owns it.
+
+    Two things the listing has no business carrying, because they cost a query
+    each and nothing in a grid of a hundred covers shows them:
+
+    * the collections it belongs to — which the collection picker was working
+      out by asking every collection whether it contained this book, one
+      request each, every one of them serialising up to a hundred books to
+      answer yes or no;
+    * how much you have written on it.
+
+    A subclass rather than a flag on BookSerializer: `collections` describes
+    the owner's own filing, like the folder path, and a conditional inside a
+    shared serializer is where that sort of leak hides (PRD §16, §29).
+    """
+
+    collections = serializers.SerializerMethodField()
+    annotations = serializers.SerializerMethodField()
+
+    class Meta(BookSerializer.Meta):
+        fields = BookSerializer.Meta.fields + ("collections", "annotations")
+        read_only_fields = BookSerializer.Meta.read_only_fields + (
+            "collections", "annotations")
+
+    @extend_schema_field(CollectionRefSerializer(many=True))
+    def get_collections(self, obj):
+        """One query, with the join. This page shows one book."""
+        return [{"id": m.collection_id, "name": m.collection.name}
+                for m in obj.memberships.select_related("collection")]
+
+    @extend_schema_field(AnnotationCountsSerializer())
+    def get_annotations(self, obj) -> dict:
+        """The requesting user's own, never anyone else's."""
+        user = self.context["request"].user
+        return {
+            "bookmarks": Bookmark.objects.filter(user=user, book=obj).count(),
+            "highlights": Highlight.objects.filter(user=user, book=obj).count(),
+            "notes": PageNote.objects.filter(user=user, book=obj).count(),
+        }
 
 
 class UploadBatchSerializer(serializers.ModelSerializer):

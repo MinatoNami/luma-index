@@ -1,4 +1,7 @@
 <script setup lang="ts">
+// Signed out: no rail, no tab bar. The shell is for people who are in.
+definePageMeta({ layout: false })
+
 const { login } = useAuth()
 const route = useRoute()
 

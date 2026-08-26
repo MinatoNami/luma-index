@@ -1,0 +1,116 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: #A5A3FF; text-decoration: none; } a:hover { color: #9E9CFF; }
+    * { box-sizing: border-box; }
+  </style>
+</helmet>
+
+<div style="width: 1440px; height: 900px; display: flex; flex-direction: column; background: #111013; color: #F2F0EC; overflow: hidden;">
+
+  <!-- Reader chrome: four controls and a menu, not nine glyphs in a row -->
+  <header style="display: flex; align-items: center; gap: 12px; height: 52px; padding: 0 16px; background: #1D1C20; border-bottom: 1px solid #2E2C33; flex: none;">
+    <span style="display: grid; place-items: center; width: 32px; height: 32px; border-radius: 6px; color: #B3AEA6;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+    </span>
+
+    <div style="min-width: 0;">
+      <div style="font-size: 15px; font-weight: 500; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Moby-Dick; or, The Whale</div>
+      <div style="font-size: 12px; color: #8B8680; line-height: 1.2;">Herman Melville</div>
+    </div>
+
+    <div style="flex: 1;"></div>
+
+    <!-- Progress belongs in the bar, where it is glanceable -->
+    <div style="display: flex; align-items: center; gap: 10px; margin-right: 4px;">
+      <span style="font-size: 13px; color: #B3AEA6; font-variant-numeric: tabular-nums;">31 / 94</span>
+      <div style="width: 120px; height: 4px; border-radius: 999px; background: #111013; overflow: hidden;">
+        <div style="width: 33%; height: 100%; background: #8E8CFF; border-radius: 999px;"></div>
+      </div>
+    </div>
+
+    <div style="display: flex; align-items: center; gap: 2px;">
+      <span style="display: grid; place-items: center; width: 32px; height: 32px; border-radius: 6px; color: #B3AEA6;">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      </span>
+      <span style="display: grid; place-items: center; width: 32px; height: 32px; border-radius: 6px; color: #B3AEA6;">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+      </span>
+      <span style="display: grid; place-items: center; width: 32px; height: 32px; border-radius: 6px; background: #24233A; color: #A5A3FF;">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16"/><path d="M4 12h10"/><path d="M4 19h7"/></svg>
+      </span>
+      <span style="display: grid; place-items: center; width: 32px; height: 32px; border-radius: 6px; color: #B3AEA6;">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/></svg>
+      </span>
+    </div>
+  </header>
+
+  <div style="flex: 1; display: flex; min-height: 0;">
+
+    <!-- Page -->
+    <div style="flex: 1; min-width: 0; display: flex; justify-content: center; padding: 32px 0; overflow: hidden;">
+      <div style="width: 620px; background: #FFFFFF; border: 1px solid #2E2C33; border-radius: 4px; box-shadow: 0 2px 8px rgb(0 0 0 / 45%); padding: 56px 64px; font-family: ui-serif, Georgia, "Times New Roman", serif;">
+        <div style="font-size: 12px; letter-spacing: 0.1em; color: #8B8680; text-transform: uppercase; margin-bottom: 28px;">Chapter 1 · Loomings</div>
+        <p style="margin: 0 0 18px; font-size: 16px; line-height: 1.72; text-wrap: pretty;">
+          <span style="background: #FBEFC4; border-radius: 2px; padding: 1px 0;">Call me Ishmael.</span> Some years ago—never mind how long precisely—having little or no money in my purse, and nothing particular to interest me on shore, I thought I would sail about a little and see the watery part of the world.
+        </p>
+        <p style="margin: 0 0 18px; font-size: 16px; line-height: 1.72; text-wrap: pretty;">
+          It is a way I have of <span style="background: #D9E4FA; border-radius: 2px; padding: 1px 0;">driving off the spleen and regulating the circulation</span>. Whenever I find myself growing grim about the mouth; whenever it is a damp, drizzly November in my soul; whenever I find myself involuntarily pausing before coffin warehouses, and bringing up the rear of every funeral I meet.
+        </p>
+        <p style="margin: 0 0 18px; font-size: 16px; line-height: 1.72; text-wrap: pretty;">
+          There now is your insular city of the Manhattoes, belted round by wharves as Indian isles by coral reefs—commerce surrounds it with her surf. Right and left, the streets take you waterward.
+        </p>
+        <p style="margin: 0; font-size: 16px; line-height: 1.72; color: #B3AEA6; text-wrap: pretty;">
+          There is nothing surprising in this. If they but knew it, almost all men in their degree, some time or other, cherish very nearly the same feelings towards the ocean with me.
+        </p>
+      </div>
+    </div>
+
+    <!-- Annotations -->
+    <aside style="width: 320px; flex: none; background: #1D1C20; border-left: 1px solid #2E2C33; display: flex; flex-direction: column;">
+      <div style="display: flex; gap: 4px; padding: 12px 16px 0;">
+        <span style="padding: 6px 12px; border-radius: 999px; background: #24233A; color: #A5A3FF; font-size: 13px; font-weight: 500;">Highlights 2</span>
+        <span style="padding: 6px 12px; border-radius: 999px; color: #B3AEA6; font-size: 13px;">Bookmarks 1</span>
+        <span style="padding: 6px 12px; border-radius: 999px; color: #B3AEA6; font-size: 13px;">Notes</span>
+      </div>
+
+      <div style="padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+
+        <div style="padding: 14px; border: 1px solid #2E2C33; border-radius: 10px;">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+            <span style="width: 10px; height: 10px; border-radius: 3px; background: #E8C84E;"></span>
+            <span style="font-size: 12px; color: #8B8680;">Page 1</span>
+            <span style="margin-left: auto; font-size: 12px; color: #8B8680;">Today</span>
+          </div>
+          <div style="font-size: 14px; line-height: 1.5; font-family: ui-serif, Georgia, serif;">“Call me Ishmael.”</div>
+          <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #111013; font-size: 13px; color: #B3AEA6; line-height: 1.5;">The most famous opening in English.</div>
+        </div>
+
+        <div style="padding: 14px; border: 1px solid #2E2C33; border-radius: 10px;">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+            <span style="width: 10px; height: 10px; border-radius: 3px; background: #7FA3E8;"></span>
+            <span style="font-size: 12px; color: #8B8680;">Page 1</span>
+            <span style="margin-left: auto; font-size: 12px; color: #8B8680;">Today</span>
+          </div>
+          <div style="font-size: 14px; line-height: 1.5; font-family: ui-serif, Georgia, serif;">“driving off the spleen and regulating the circulation”</div>
+        </div>
+
+        <div style="display: flex; align-items: center; justify-content: center; gap: 8px; height: 40px; border: 1px dashed #2E2C33; border-radius: 10px; color: #8B8680; font-size: 13px;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Select text to highlight
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

@@ -1,0 +1,1182 @@
+<script setup lang="ts">
+import { formatBytes, type Book, type Folder, type UploadBatch } from '~/composables/useLibrary'
+import type { ViewMode } from '~/components/ViewToggle.vue'
+import type { SortKey } from '~/components/SortMenu.vue'
+import type { RowAction } from '~/components/RowMenu.vue'
+
+const library = useLibrary()
+const route = useRoute()
+const router = useRouter()
+
+const currentId = computed(() => {
+  const raw = route.query.folder
+  return raw === undefined || raw === 'root' ? null : Number(raw)
+})
+
+const search = ref('')
+const busy = ref(false)
+const error = ref('')
+const notice = ref('')
+const dragging = ref(false)
+const batches = ref<UploadBatch[]>([])
+
+// A large upload takes minutes. Without this it is a spinner, and a spinner
+// for four minutes is indistinguishable from a stuck one — which is how a
+// working upload gets abandoned halfway.
+const uploadProgress = ref<{ file: string; sent: number; total: number
+                             percent: number } | null>(null)
+
+// Remembered locally. PRD §24 wants view preferences on UserSettings so they
+// follow a reader between devices; that lands with the reader.
+const view = useState<ViewMode>('library-view', () => 'list')
+
+// Kept alongside the layout: an order you chose should survive walking into a
+// folder and back out again.
+const sortKey = useState<SortKey>('library-sort', () => 'name')
+const sortDesc = useState<boolean>('library-sort-desc', () => false)
+
+// "Type" is not a column the database can order by — folders and books come
+// back as separate lists — so it asks for plain alphabetical and decides which
+// block is drawn first.
+const apiSort = computed(() => {
+  if (sortKey.value === 'type') return 'name'
+  return sortDesc.value ? `-${sortKey.value}` : sortKey.value
+})
+const filesFirst = computed(() => sortKey.value === 'type' && sortDesc.value)
+
+const dialog = ref<{
+  title: string; label?: string; value?: string; confirmLabel?: string
+  danger?: boolean; message?: string; run: (value: string) => Promise<void>
+} | null>(null)
+
+const fileInput = ref<HTMLInputElement | null>(null)
+let dragDepth = 0
+
+// What is being moved, if anything.
+const moving = ref<{ kind: 'folder' | 'book'; id: number; name: string
+                     currentFolder: number | null } | null>(null)
+const moveError = ref('')
+
+const collections = useCollections()
+const inCollection = ref<{ id: number; title: string } | null>(null)
+
+
+// The virtual views from §12. A view and a folder are mutually exclusive:
+// "favourites" is not a place in the tree.
+type LibraryView = 'files' | 'favourites' | 'recent' | 'unsorted'
+const activeView = computed<LibraryView>(() => {
+  const v = route.query.view
+  return v === 'favourites' || v === 'recent' || v === 'unsorted' ? v : 'files'
+})
+const activeCollection = computed(() =>
+  route.query.collection ? Number(route.query.collection) : null)
+
+async function toggleFavourite(book: Book) {
+  const next = !book.is_favourite
+  try {
+    await collections.setFavourite(book.id, next)
+    await load({ quiet: true })
+  } catch {
+    error.value = 'Could not update that favourite.'
+  }
+}
+
+// -- drag and drop ---------------------------------------------------------- //
+// Two different drops land on a folder: files from the computer, which upload
+// into it, and a row from the page, which moves. They are told apart by whether
+// the drop carries files.
+const DRAG_TYPE = 'application/x-lumaindex'
+const dragPayload = ref<{ kind: 'folder' | 'book'; id: number } | null>(null)
+const dropTarget = ref<number | null | 'none'>('none')
+
+function onRowDragStart(event: DragEvent, kind: 'folder' | 'book', id: number) {
+  dragPayload.value = { kind, id }
+  event.dataTransfer?.setData(DRAG_TYPE, JSON.stringify({ kind, id }))
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+}
+
+function onRowDragEnd() {
+  dragPayload.value = null
+  dropTarget.value = 'none'
+}
+
+function canDropOn(folder: Folder): boolean {
+  const dragged = dragPayload.value
+  // A folder cannot be dropped into itself. Deeper cycles are the server's
+  // call, and its message is shown if it refuses.
+  return !(dragged?.kind === 'folder' && dragged.id === folder.id)
+}
+
+function onFolderDragOver(event: DragEvent, folder: Folder) {
+  if (!canDropOn(folder)) return
+  event.preventDefault()
+  event.stopPropagation()
+  dropTarget.value = folder.id
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = event.dataTransfer.types.includes('Files') ? 'copy' : 'move'
+  }
+}
+
+async function onFolderDrop(event: DragEvent, folder: Folder) {
+  event.preventDefault()
+  event.stopPropagation()
+  dropTarget.value = 'none'
+  dragDepth = 0
+  dragging.value = false
+
+  const files = Array.from(event.dataTransfer?.files ?? [])
+  if (files.length) {
+    await submitFiles(files, folder.id)
+    return
+  }
+
+  const raw = event.dataTransfer?.getData(DRAG_TYPE)
+  const dragged = raw ? JSON.parse(raw) : dragPayload.value
+  if (!dragged || !canDropOn(folder)) return
+
+  // Resolve the name so the confirmation names what moved, rather than
+  // reading as an empty pair of quotes.
+  const name = dragged.kind === 'folder'
+    ? folders.value.find(f => f.id === dragged.id)?.name ?? 'folder'
+    : books.value.find(b => b.id === dragged.id)?.title ?? 'book'
+
+  moving.value = { kind: dragged.kind, id: dragged.id, name,
+                   currentFolder: currentId.value }
+  await completeMove(folder.id)
+}
+
+function startMove(item: Folder | Book, kind: 'folder' | 'book') {
+  moveError.value = ''
+  moving.value = {
+    kind,
+    id: item.id,
+    name: kind === 'folder' ? (item as Folder).name : (item as Book).title,
+    currentFolder: kind === 'folder' ? (item as Folder).parent : (item as Book).folder,
+  }
+}
+
+async function completeMove(destination: number | null) {
+  const item = moving.value
+  if (!item) return
+  busy.value = true
+  moveError.value = ''
+  try {
+    if (item.kind === 'folder') await library.updateFolder(item.id, { parent: destination })
+    else await library.updateBook(item.id, { folder: destination })
+    moving.value = null
+    notice.value = `Moved “${item.name}”.`
+    await load({ quiet: true })
+  } catch (err: any) {
+    // The server owns the cycle and depth rules; showing its message avoids
+    // restating them here and getting them subtly different.
+    moveError.value = err?.data?.detail || 'That move was not allowed.'
+  } finally {
+    busy.value = false
+  }
+}
+
+// The middleware seeds this from the account's saved preference. Changing it
+// here is a per-session override; Settings is where it is saved for good.
+watch(view, value => import.meta.client && localStorage.setItem('lumaindex-view', value))
+
+/**
+ * One description of "which books are we looking at", used by the initial fetch
+ * and by loading the next page. Two copies of this drifting apart would show up
+ * as a Load more that quietly returns a different listing.
+ */
+function bookQuery() {
+  const view = activeView.value
+  const collection = activeCollection.value
+  const params: Record<string, string> = {}
+  if (search.value) params.search = search.value
+  if (view !== 'files') params.view = view
+  if (collection !== null) params.collection = String(collection)
+  params.sort = apiSort.value
+  // Folders only make sense while browsing the tree; a view or a collection is
+  // a flat list of books.
+  return { params, browsing: view === 'files' && collection === null }
+}
+
+// Fetched during SSR, not in onMounted. Loading in onMounted meant the server
+// always rendered the skeleton — so every visit flashed placeholders before the
+// real content, and the Nuxt server was doing no useful work.
+const { data, pending, error: loadError, refresh: reload } = await useAsyncData(
+  'library-folder',
+  async () => {
+    const { params, browsing } = bookQuery()
+    const empty = { items: [], total: 0 }
+    const [folderList, bookList] = await Promise.all([
+      browsing ? library.listFolders(currentId.value, { sort: apiSort.value })
+               : Promise.resolve(empty),
+      browsing
+        ? library.listBooks(currentId.value, params)
+        : library.listBooks(null, params),
+    ])
+    const detail = browsing && currentId.value !== null
+      ? await library.folderDetail(currentId.value)
+      : null
+    return {
+      folders: folderList.items, books: bookList.items, detail,
+      // What the server holds, not what arrived: the listing is capped, and a
+      // truncated page is otherwise indistinguishable from a short one.
+      folderTotal: folderList.total, bookTotal: bookList.total,
+    }
+  },
+  {
+    watch: [currentId, search, activeView, activeCollection, apiSort],
+    default: () => ({ folders: [], books: [], detail: null,
+                      folderTotal: 0, bookTotal: 0 }),
+  },
+)
+
+// Surfaced rather than swallowed: a failed fetch used to render as an empty
+// folder, which is indistinguishable from a folder that really is empty.
+watch(loadError, (failure) => {
+  if (failure) {
+    const f = failure as any
+    error.value = f?.data?.detail || f?.message
+      || `Could not load this folder (${f?.statusCode ?? 'error'}).`
+  }
+}, { immediate: true })
+
+const folders = computed<Folder[]>(() => data.value?.folders ?? [])
+
+// Pages fetched past the first. Cleared whenever the listing changes, or a
+// Load more from the previous folder would append into the new one.
+const extraBooks = ref<Book[]>([])
+const loadingMore = ref(false)
+watch([currentId, search, activeView, activeCollection, apiSort],
+      () => { extraBooks.value = [] })
+
+const books = computed<Book[]>(
+  () => [...(data.value?.books ?? []), ...extraBooks.value])
+
+async function loadMore() {
+  if (loadingMore.value) return
+  loadingMore.value = true
+  try {
+    const { params, browsing } = bookQuery()
+    const page = await library.listBooks(browsing ? currentId.value : null,
+                                         { ...params, offset: books.value.length })
+    // Guard against a double click racing itself into duplicate rows.
+    const known = new Set(books.value.map(b => b.id))
+    extraBooks.value.push(...page.items.filter(b => !known.has(b.id)))
+  } catch (failure) {
+    const f = failure as any
+    error.value = f?.data?.detail || f?.message || 'Could not load any more.'
+  } finally {
+    loadingMore.value = false
+  }
+}
+const currentFolder = computed<Folder | null>(() => data.value?.detail ?? null)
+const breadcrumbs = computed<Folder[]>(() => data.value?.detail?.ancestors ?? [])
+// Only a first load shows placeholders; a background refresh must not blank the
+// screen the user is already reading.
+const loading = computed(() => pending.value && !data.value?.folders.length
+  && !data.value?.books.length)
+
+// -- selection -------------------------------------------------------------- //
+
+// Folders before books, matching the order they are drawn, so a shift-click
+// range covers exactly the rows between the two that were clicked.
+const selectable = computed(() => {
+  const folderRows = folders.value.map(f => ({ kind: 'folder' as const, id: f.id }))
+  const bookRows = books.value.map(b => ({ kind: 'book' as const, id: b.id }))
+  // Follows the drawn order, including when "Type / files first" flips the two
+  // blocks — a shift-click range measured against the other order would select
+  // rows the user cannot see between the two they clicked.
+  return filesFirst.value ? [...bookRows, ...folderRows] : [...folderRows, ...bookRows]
+})
+const selection = useSelection(selectable)
+const bulkMoving = ref(false)
+const bulkCollecting = ref(false)
+
+/** Open the item, unless the click was a selection gesture. */
+function rowClick(kind: 'folder' | 'book', id: number, event: MouseEvent, open?: () => void) {
+  if (selection.handleClick(kind, id, event)) {
+    event.preventDefault()
+    return
+  }
+  open?.()
+}
+
+async function runBulk(payload: Parameters<typeof library.bulk>[0], verb: string) {
+  busy.value = true
+  error.value = ''
+  notice.value = ''
+  try {
+    const result = await library.bulk({
+      folders: selection.folderIds.value,
+      books: selection.bookIds.value,
+      ...payload,
+    })
+    const moved = result.folders + result.books
+    const parts = [`${verb} ${moved} item${moved === 1 ? '' : 's'}`]
+    // Skipped items are the reason this endpoint reports instead of failing;
+    // swallowing them here would waste that.
+    if (result.skipped.length) {
+      const reasons = [...new Set(result.skipped.map(s => s.reason))]
+      parts.push(`${result.skipped.length} skipped — ${reasons.join(' ')}`)
+    }
+    notice.value = parts.join(' · ')
+    selection.clear()
+    await load({ quiet: true })
+  } catch (err: any) {
+    error.value = err?.data?.detail || 'That did not work.'
+  } finally {
+    busy.value = false
+    bulkMoving.value = false
+    bulkCollecting.value = false
+  }
+}
+
+function bulkTrash() {
+  const n = selection.count.value
+  dialog.value = {
+    title: `Move ${n} item${n === 1 ? '' : 's'} to the trash?`,
+    message: selection.folderIds.value.length
+      ? 'Everything inside the selected folders goes too. You can restore it from the trash.'
+      : 'You can restore them from the trash.',
+    confirmLabel: 'Move to trash',
+    danger: true,
+    run: async () => { await runBulk({ action: 'trash' }, 'Trashed') },
+  }
+}
+
+function onKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && selection.active.value) {
+    selection.clear()
+    return
+  }
+  // Only when a selection is already running, or this would steal the browser's
+  // select-all from someone reading the page.
+  const typing = (event.target as HTMLElement | null)?.closest('input, textarea')
+  if ((event.metaKey || event.ctrlKey) && event.key === 'a' && selection.active.value && !typing) {
+    event.preventDefault()
+    selection.selectAll()
+  }
+}
+onMounted(() => window.addEventListener('keydown', onKeydown))
+onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
+
+async function load(_options: { quiet?: boolean } = {}) {
+  error.value = ''
+  try {
+    await reload()
+  } catch (err: any) {
+    error.value = err?.data?.detail || 'Could not load this folder.'
+  }
+}
+
+// Covers are rendered after upload, so poll briefly while any are missing.
+let coverTimer: ReturnType<typeof setTimeout> | null = null
+watch(books, (list) => {
+  if (coverTimer) clearTimeout(coverTimer)
+  if (list.some(b => !b.thumbnail_path)) {
+    coverTimer = setTimeout(() => load({ quiet: true }), 2500)
+  }
+})
+onBeforeUnmount(() => {
+  if (coverTimer) clearTimeout(coverTimer)
+  if (pollTimer) clearTimeout(pollTimer)
+})
+
+function open(folder: Folder) {
+  router.push({ query: { folder: String(folder.id) } })
+}
+function goTo(id: number | null) {
+  router.push({ query: id === null ? {} : { folder: String(id) } })
+}
+
+async function act(work: () => Promise<unknown>, message?: string) {
+  busy.value = true
+  error.value = ''
+  // Cleared before the work rather than overwritten after it, so an action
+  // that reports its own outcome — a bulk action counting what it skipped —
+  // still has its message standing when this returns.
+  notice.value = ''
+  try {
+    await work()
+    if (message) notice.value = message
+    await load({ quiet: true })
+  } catch (err: any) {
+    error.value = err?.data?.detail || 'That did not work.'
+  } finally {
+    busy.value = false
+    dialog.value = null
+  }
+}
+
+// -- upload ---------------------------------------------------------------- //
+
+async function submitFiles(files: File[], destination: number | null = currentId.value) {
+  if (!files.length) return
+  busy.value = true
+  error.value = ''
+  notice.value = ''
+  try {
+    const result = await library.upload(files, destination, (p) => {
+      uploadProgress.value = p
+    })
+    const parts: string[] = []
+    if (result.imported.length) parts.push(`${result.imported.length} added`)
+    if (result.duplicates) parts.push(`${result.duplicates} already here`)
+    if (result.batches.length) parts.push(`${result.batches.length} archive queued`)
+    notice.value = parts.join(' · ') || 'Nothing to add.'
+    if (result.errors.length) error.value = result.errors.join(' · ')
+    if (result.batches.length) {
+      batches.value = result.batches
+      pollBatches()
+    }
+    await load({ quiet: true })
+  } catch (err: any) {
+    error.value = err?.data?.detail || 'Upload failed.'
+  } finally {
+    busy.value = false
+    uploadProgress.value = null
+  }
+}
+
+let pollTimer: ReturnType<typeof setTimeout> | null = null
+
+async function pollBatches() {
+  if (pollTimer) clearTimeout(pollTimer)
+  batches.value = await Promise.all(batches.value.map(b => library.batch(b.id).catch(() => b)))
+  if (batches.value.some(b => b.status === 'pending' || b.status === 'running')) {
+    pollTimer = setTimeout(pollBatches, 1200)
+  } else {
+    await load({ quiet: true })
+  }
+}
+
+function onDrop(event: DragEvent) {
+  dragDepth = 0
+  dragging.value = false
+  submitFiles(Array.from(event.dataTransfer?.files ?? []))
+}
+// Counted, because dragging over a child element fires dragleave on the parent.
+function onDragEnter() { dragDepth += 1; dragging.value = true }
+function onDragLeave() { dragDepth -= 1; if (dragDepth <= 0) dragging.value = false }
+
+function onPick(event: Event) {
+  const input = event.target as HTMLInputElement
+  submitFiles(Array.from(input.files ?? []))
+  input.value = ''
+}
+
+// -- actions ---------------------------------------------------------------- //
+
+function newFolder() {
+  dialog.value = {
+    title: 'New folder', label: 'Name', value: 'Untitled folder', confirmLabel: 'Create',
+    run: async name => { await library.createFolder(name, currentId.value) },
+  }
+}
+function renameFolder(folder: Folder) {
+  dialog.value = {
+    title: 'Rename folder', label: 'Name', value: folder.name, confirmLabel: 'Rename',
+    run: async name => { await library.updateFolder(folder.id, { name }) },
+  }
+}
+function renameBook(book: Book) {
+  dialog.value = {
+    title: 'Rename', label: 'Title', value: book.title, confirmLabel: 'Rename',
+    run: async title => { await library.updateBook(book.id, { title }) },
+  }
+}
+function moveUp(item: Folder | Book, kind: 'folder' | 'book') {
+  const destination = currentFolder.value?.parent ?? null
+  return act(() => kind === 'folder'
+    ? library.updateFolder(item.id, { parent: destination })
+    : library.updateBook(item.id, { folder: destination }), 'Moved up one level.')
+}
+function deleteFolder(folder: Folder) {
+  dialog.value = {
+    title: `Move “${folder.name}” to trash?`,
+    message: folder.book_count || folder.has_children
+      ? 'Everything inside goes with it. You can restore it from the trash.'
+      : 'You can restore it from the trash.',
+    confirmLabel: 'Move to trash', danger: true,
+    run: async () => { await library.trashFolder(folder.id) },
+  }
+}
+function deleteBook(book: Book) {
+  dialog.value = {
+    title: `Move “${book.title}” to trash?`,
+    message: 'You can restore it from the trash.',
+    confirmLabel: 'Move to trash', danger: true,
+    run: async () => { await library.trashBook(book.id) },
+  }
+}
+
+function folderActions(folder: Folder) {
+  return [
+    { label: 'Rename', icon: 'pencil', run: () => renameFolder(folder) },
+    { label: 'Move to…', icon: 'folder', run: () => startMove(folder, 'folder') },
+    ...(currentId.value !== null
+      ? [{ label: 'Move up one level', icon: 'arrow-up', run: () => moveUp(folder, 'folder') }]
+      : []),
+    { label: 'Move to trash', icon: 'trash', danger: true, run: () => deleteFolder(folder) },
+  ]
+}
+async function toggleShare(book: Book) {
+  const sharing = useSharing()
+  const state = await sharing.status(book.id)
+  const next = state.visibility === 'shared' ? 'private' : 'shared'
+
+  dialog.value = {
+    title: next === 'shared' ? `Share “${book.title}”?` : `Stop sharing “${book.title}”?`,
+    message: next === 'shared'
+      ? 'Everyone signed in to this instance will be able to read it. Their reading position and notes stay their own, and nothing about your folders is shared.'
+      : state.other_readers
+        ? `${state.other_readers} other reader(s) have notes on this. They keep them — re-share and their notes come back.`
+        : 'Nobody else will be able to open it.',
+    confirmLabel: next === 'shared' ? 'Share' : 'Stop sharing',
+    danger: next === 'private',
+    run: async () => { await sharing.setVisibility(book.id, next) },
+  }
+}
+
+function bookActions(book: Book) {
+  return [
+    { label: 'Rename', icon: 'pencil', run: () => renameBook(book) },
+    { label: book.visibility === 'shared' ? 'Stop sharing' : 'Share with instance',
+      icon: 'inbox', run: () => toggleShare(book) },
+    { label: 'Open', icon: 'file', run: () => navigateTo(`/books/${book.id}`) },
+    { label: 'Details', icon: 'collection',
+      run: () => navigateTo(`/books/${book.id}/details`) },
+    { label: 'Download', icon: 'download',
+      run: () => window.open(`/api/library/books/${book.id}/content`, '_blank') },
+    { label: 'Add to collection…', icon: 'collection',
+      run: () => { inCollection.value = { id: book.id, title: book.title } } },
+    { label: 'Move to…', icon: 'folder', run: () => startMove(book, 'book') },
+    ...(currentId.value !== null
+      ? [{ label: 'Move up one level', icon: 'arrow-up', run: () => moveUp(book, 'book') }]
+      : []),
+    { label: 'Move to trash', icon: 'trash', danger: true, run: () => deleteBook(book) },
+  ]
+}
+
+/**
+ * What the wide toolbar shows, for a screen too narrow to lay it out.
+ *
+ * The same state either way — these are not a second set of controls, just a
+ * second way to reach the first.
+ */
+const toolbarOverflow = computed<RowAction[]>(() => [
+  { label: sortDesc.value ? 'Sort ascending' : 'Sort descending',
+    icon: sortDesc.value ? 'arrow-up' : 'arrow-down',
+    run: () => { sortDesc.value = !sortDesc.value } },
+  { label: view.value === 'list' ? 'Show as grid' : 'Show as list',
+    icon: view.value === 'list' ? 'grid-view' : 'list-view',
+    run: () => { view.value = view.value === 'list' ? 'grid' : 'list' } },
+  { label: 'New folder', icon: 'folder-plus', run: newFolder },
+])
+
+const isEmpty = computed(() => !folders.value.length && !books.value.length)
+
+// The API caps a listing. Saying so is the whole point of the cap: a hundred
+// books shown out of four hundred looks exactly like a library of a hundred.
+const shown = computed(() => folders.value.length + books.value.length)
+const held = computed(() => (data.value?.folderTotal ?? 0) + (data.value?.bookTotal ?? 0))
+const truncated = computed(() => held.value > shown.value)
+const bookHref = (book: Book) => `/books/${book.id}`
+
+function itemLabel(folder: Folder): string {
+  const count = folder.item_count ?? folder.book_count
+  return count === 0 ? 'Empty' : `${count} item${count === 1 ? '' : 's'}`
+}
+</script>
+
+<template>
+  <div class="shell" @dragenter.prevent="onDragEnter" @dragover.prevent
+       @dragleave.prevent="onDragLeave" @drop.prevent="onDrop">
+<main class="wrap">
+      <!-- The subject of the page, for anyone navigating by heading. Visually
+           the breadcrumb already says it, so this is not shown twice. -->
+      <h1 class="sr-only">{{ currentFolder?.name || 'My library' }}</h1>
+
+      <nav class="crumbs" aria-label="Breadcrumb">
+        <button type="button" class="crumb" @click="goTo(null)">My library</button>
+        <template v-for="crumb in breadcrumbs" :key="crumb.id">
+          <AppIcon name="chevron-right" :size="14" class="sep" />
+          <button type="button" class="crumb" @click="goTo(crumb.id)">{{ crumb.name }}</button>
+        </template>
+        <template v-if="currentFolder">
+          <AppIcon name="chevron-right" :size="14" class="sep" />
+          <span class="crumb current" aria-current="page">{{ currentFolder.name }}</span>
+        </template>
+      </nav>
+
+
+      <div class="toolbar">
+        <div class="search">
+          <AppIcon name="search" :size="16" />
+          <input v-model="search" type="search" placeholder="Search titles…"
+                 aria-label="Search titles" />
+        </div>
+        <div class="spacer" />
+        <!-- Wide screens get the controls laid out; a phone gets them in one
+             menu. Left to wrap, they cost three rows before the first cover. -->
+        <div class="wide-only">
+          <SortMenu v-model="sortKey" v-model:descending="sortDesc" />
+        </div>
+        <div class="wide-only">
+          <ViewToggle v-model="view" />
+        </div>
+        <div class="wide-only">
+          <AppButton icon="folder-plus" :disabled="busy" @click="newFolder">New folder</AppButton>
+        </div>
+        <div class="narrow-only">
+          <RowMenu :actions="toolbarOverflow" label="Sort, view and folders" />
+        </div>
+        <AppButton class="upload" variant="primary" icon="upload" :loading="busy"
+                   @click="fileInput?.click()">Upload</AppButton>
+        <input ref="fileInput" class="sr-only" type="file" multiple tabindex="-1"
+               aria-label="Choose PDFs or a ZIP to upload"
+               accept="application/pdf,.pdf,.zip,application/zip" @change="onPick" />
+      </div>
+
+      <p v-if="error" class="notice notice-error" role="alert">
+        <AppIcon name="warning" :size="17" /> {{ error }}
+      </p>
+      <p v-else-if="notice" class="notice notice-info" role="status">
+        <AppIcon name="check" :size="17" /> {{ notice }}
+      </p>
+
+      <ul v-if="batches.length" class="batches">
+        <li v-for="batch in batches" :key="batch.id" class="panel">
+          <AppIcon name="upload" :size="17" />
+          <div class="batch-body">
+            <strong>{{ batch.original_filename }}</strong>
+            <span class="tertiary">
+              {{ batch.status === 'pending' ? 'queued' : batch.status }}
+              <template v-if="batch.counts.discovered">
+                · {{ batch.counts.imported }}/{{ batch.counts.discovered }} imported
+              </template>
+              <template v-if="batch.counts.skipped_duplicate">
+                · {{ batch.counts.skipped_duplicate }} already here
+              </template>
+            </span>
+          </div>
+        </li>
+      </ul>
+
+      <div v-if="uploadProgress" class="upload-progress panel">
+        <div class="upload-head">
+          <strong>Uploading {{ uploadProgress.file }}</strong>
+          <span class="tertiary">
+            {{ formatBytes(uploadProgress.sent) }} of {{ formatBytes(uploadProgress.total) }}
+            · {{ uploadProgress.percent }}%
+          </span>
+        </div>
+        <div class="meter" role="progressbar" :aria-valuenow="uploadProgress.percent"
+             aria-valuemin="0" aria-valuemax="100"
+             :aria-label="`Uploading: ${uploadProgress.percent} per cent`">
+          <span class="fill" :style="{ width: `${Math.max(uploadProgress.percent, 2)}%` }" />
+        </div>
+        <p class="tertiary hint">
+          Large files are sent in pieces, so a dropped connection picks up where it left off.
+        </p>
+      </div>
+
+      <SelectionBar v-if="selection.active.value"
+                    :count="selection.count.value"
+                    :folders="selection.folderIds.value.length"
+                    :books="selection.bookIds.value.length"
+                    :all-selected="selection.allSelected.value"
+                    :busy="busy"
+                    @move="bulkMoving = true"
+                    @collect="bulkCollecting = true"
+                    @favourite="runBulk({ action: 'favourite' }, 'Favourited')"
+                    @unfavourite="runBulk({ action: 'unfavourite' }, 'Unfavourited')"
+                    @trash="bulkTrash"
+                    @select-all="selection.selectAll"
+                    @clear="selection.clear" />
+
+      <!-- Skeleton, empty, or content — never two at once ------------- -->
+      <div v-if="loading" :class="['cards', view === 'list' ? 'grid' : view]">
+        <div v-for="n in 8" :key="n" class="card panel skeleton">
+          <div class="skeleton-cover" /><div class="skeleton-line" />
+        </div>
+      </div>
+
+      <EmptyState v-else-if="isEmpty"
+                  :icon="search ? 'search' : 'inbox'"
+                  :title="search ? 'Nothing matches that' : 'This folder is empty'"
+                  :description="search
+                    ? 'Try a different word, or clear the search.'
+                    : 'Drag PDFs here, or upload a ZIP — its folders are recreated as you had them.'">
+        <AppButton v-if="!search" variant="primary" icon="upload" @click="fileInput?.click()">
+          Upload files
+        </AppButton>
+      </EmptyState>
+
+      <!-- List --------------------------------------------------------- -->
+      <div v-else-if="view === 'list'" class="listing panel">
+        <div class="row head">
+          <label class="pick">
+            <input type="checkbox" :checked="selection.allSelected.value"
+                   :indeterminate="selection.active.value && !selection.allSelected.value"
+                   aria-label="Select everything here"
+                   @change="selection.allSelected.value ? selection.clear() : selection.selectAll()" />
+          </label>
+          <span>Name</span><span>Size</span><span>Pages</span><span />
+        </div>
+        <div v-for="folder in folders" :key="`f${folder.id}`" class="row"
+             :style="{ order: filesFirst ? 2 : 1 }"
+             :class="{ 'drop-into': dropTarget === folder.id,
+                       'is-selected': selection.has('folder', folder.id) }" draggable="true"
+             @dragstart="onRowDragStart($event, 'folder', folder.id)" @dragend="onRowDragEnd"
+             @dragover="onFolderDragOver($event, folder)"
+             @dragleave="dropTarget = 'none'" @drop="onFolderDrop($event, folder)">
+          <label class="pick">
+            <input type="checkbox" :checked="selection.has('folder', folder.id)"
+                   :aria-label="`Select ${folder.name}`"
+                   @click.stop @change="selection.toggle('folder', folder.id)" />
+          </label>
+          <button class="cell name" type="button"
+                  @click="rowClick('folder', folder.id, $event, () => open(folder))">
+            <span class="folder-chip"><AppIcon name="folder" :size="17" /></span>
+            <span class="label">{{ folder.name }}</span>
+          </button>
+          <span class="cell tertiary">{{ itemLabel(folder) }}</span>
+          <span class="cell" />
+          <RowMenu :actions="folderActions(folder)" :label="`Actions for ${folder.name}`" />
+        </div>
+        <div v-for="book in books" :key="`b${book.id}`" class="row"
+             :style="{ order: filesFirst ? 1 : 2 }"
+             :class="{ 'is-selected': selection.has('book', book.id) }" draggable="true"
+             @dragstart="onRowDragStart($event, 'book', book.id)" @dragend="onRowDragEnd">
+          <label class="pick">
+            <input type="checkbox" :checked="selection.has('book', book.id)"
+                   :aria-label="`Select ${book.title}`"
+                   @click.stop @change="selection.toggle('book', book.id)" />
+          </label>
+          <NuxtLink class="cell name" :to="bookHref(book)"
+                    @click="rowClick('book', book.id, $event)">
+            <BookCover :book="book" size="sm" />
+            <span class="label">{{ book.title }}</span>
+            <span v-if="book.visibility === 'shared'" class="badge-shared">shared</span>
+            <span v-if="book.source?.availability_status !== 'available'" class="badge-warn">
+              unavailable
+            </span>
+          </NuxtLink>
+          <span class="cell tertiary">{{ book.source ? formatBytes(book.source.file_size) : '—' }}</span>
+          <span class="cell tertiary">{{ book.page_count ?? '…' }}</span>
+          <button class="star" type="button"
+                  :class="{ on: book.is_favourite }"
+                  :title="book.is_favourite ? 'Remove from favourites' : 'Add to favourites'"
+                  :aria-pressed="book.is_favourite"
+                  @click.stop.prevent="toggleFavourite(book)">
+            <AppIcon :name="book.is_favourite ? 'star-filled' : 'star'" :size="16" />
+          </button>
+          <RowMenu :actions="bookActions(book)" :label="`Actions for ${book.title}`" />
+        </div>
+      </div>
+
+      <!-- Grid and large icons ----------------------------------------- -->
+      <div v-else class="listing">
+        <!-- Two bands rather than one grid: a folder is a different kind
+             of thing from a book, and interleaving them left the rows
+             ragged. Sorting by type swaps the bands over. -->
+        <div v-if="folders.length" class="folders"
+             :style="{ order: filesFirst ? 2 : 1 }">
+          <div v-for="folder in folders" :key="`f${folder.id}`"
+               class="card folder-card panel"
+               :class="{ 'drop-into': dropTarget === folder.id,
+                         'is-selected': selection.has('folder', folder.id) }" draggable="true"
+               @dragstart="onRowDragStart($event, 'folder', folder.id)" @dragend="onRowDragEnd"
+               @dragover="onFolderDragOver($event, folder)"
+               @dragleave="dropTarget = 'none'" @drop="onFolderDrop($event, folder)">
+            <label class="card-pick" :class="{ on: selection.has('folder', folder.id) }"
+                   @click.stop>
+              <input type="checkbox" :checked="selection.has('folder', folder.id)"
+                     :aria-label="`Select ${folder.name}`"
+                     @change="selection.toggle('folder', folder.id)" />
+            </label>
+            <button class="card-open" type="button"
+                    @click="rowClick('folder', folder.id, $event, () => open(folder))">
+              <FolderCover :folder="folder" size="sm" />
+              <span class="card-body">
+                <span class="card-title">{{ folder.name }}</span>
+                <span class="card-meta tertiary">{{ itemLabel(folder) }}</span>
+              </span>
+            </button>
+            <RowMenu class="card-menu" :actions="folderActions(folder)"
+                     :label="`Actions for ${folder.name}`" />
+          </div>
+        </div>
+
+        <div v-if="books.length" :class="['cards', view]"
+             :style="{ order: filesFirst ? 1 : 2 }">
+          <div v-for="book in books" :key="`b${book.id}`" class="card panel"
+               :class="{ 'is-selected': selection.has('book', book.id) }" draggable="true"
+               @dragstart="onRowDragStart($event, 'book', book.id)" @dragend="onRowDragEnd">
+            <label class="card-pick" :class="{ on: selection.has('book', book.id) }" @click.stop>
+              <input type="checkbox" :checked="selection.has('book', book.id)"
+                     :aria-label="`Select ${book.title}`"
+                     @change="selection.toggle('book', book.id)" />
+            </label>
+            <NuxtLink class="card-open" :to="bookHref(book)"
+                      @click="rowClick('book', book.id, $event)">
+              <BookCover :book="book" :size="view === 'large' ? 'lg' : 'md'" />
+              <span class="card-title">{{ book.title }}</span>
+              <span v-if="book.progress" class="card-meta reading">
+                {{ Math.round(book.progress.percentage) }}%<template v-if="book.page_count">
+                  · page {{ book.progress.page + 1 }} of {{ book.page_count }}</template>
+              </span>
+              <span v-else class="card-meta tertiary">
+                {{ book.page_count ? `${book.page_count} pages` : 'Preparing…' }}
+                <template v-if="book.source"> · {{ formatBytes(book.source.file_size) }}</template>
+              </span>
+            </NuxtLink>
+            <button class="star card-star" type="button" :class="{ on: book.is_favourite }"
+                    :title="book.is_favourite ? 'Remove from favourites' : 'Add to favourites'"
+                    :aria-pressed="book.is_favourite"
+                    @click.stop.prevent="toggleFavourite(book)">
+              <AppIcon :name="book.is_favourite ? 'star-filled' : 'star'" :size="16" />
+            </button>
+            <RowMenu class="card-menu" :actions="bookActions(book)"
+                     :label="`Actions for ${book.title}`" />
+          </div>
+        </div>
+      </div>
+
+      <div v-if="truncated" class="truncation">
+        <p class="tertiary">Showing {{ shown }} of {{ held }}</p>
+        <AppButton v-if="books.length < (data?.bookTotal ?? 0)"
+                   :disabled="loadingMore" @click="loadMore">
+          {{ loadingMore ? 'Loading…' : 'Load more' }}
+        </AppButton>
+      </div>
+
+    </main>
+
+    <!-- pointer-events: none, or this overlay would intercept every drop that
+         was aimed at a folder row underneath it. -->
+    <div v-if="dragging && !dragPayload" class="dropzone" aria-hidden="true">
+      <div class="dropzone-inner">
+        <AppIcon name="upload" :size="26" />
+        <strong>Drop to add to {{ currentFolder?.name || 'your library' }}</strong>
+        <span class="tertiary">PDFs, or a ZIP of them</span>
+      </div>
+    </div>
+
+    <CollectionPicker v-if="inCollection" :book-id="inCollection.id"
+                      :book-title="inCollection.title"
+                      @cancel="inCollection = null"
+                      @done="inCollection = null; load({ quiet: true })" />
+
+    <FolderPicker v-if="bulkMoving"
+                  :title="`Move ${selection.count.value} item${selection.count.value === 1 ? '' : 's'}`"
+                  :exclude-folder-id="selection.folderIds.value"
+                  :current-folder-id="currentId"
+                  :busy="busy" :error="error"
+                  @cancel="bulkMoving = false"
+                  @choose="(id) => runBulk({ action: 'move', folder: id }, 'Moved')" />
+
+    <CollectionChooser v-if="bulkCollecting" :count="selection.bookIds.value.length"
+                       @cancel="bulkCollecting = false"
+                       @choose="(id) => runBulk({ action: 'collect', collection: id }, 'Added')" />
+
+    <FolderPicker v-if="moving" :title="`Move “${moving.name}”`"
+                  :exclude-folder-id="moving.kind === 'folder' ? moving.id : null"
+                  :current-folder-id="moving.currentFolder"
+                  :busy="busy" :error="moveError"
+                  @cancel="moving = null" @choose="completeMove" />
+
+    <PromptDialog v-if="dialog" :title="dialog.title" :label="dialog.label"
+                  :model-value="dialog.value" :confirm-label="dialog.confirmLabel"
+                  :danger="dialog.danger" :message="dialog.message" :busy="busy"
+                  @cancel="dialog = null"
+                  @confirm="value => act(() => dialog!.run(value))" />
+  </div>
+</template>
+
+<style scoped>
+.truncation {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-4) 0 0;
+  font-size: var(--text-sm);
+}
+
+.shell { min-height: 100dvh; display: flex; flex-direction: column; }
+
+.quiet-link {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  color: var(--text-secondary); text-decoration: none; font-size: var(--text-base);
+}
+.quiet-link:hover { color: var(--text); }
+
+.wrap { width: 100%; max-width: 72rem; margin: 0 auto;
+        padding: var(--space-5); display: grid; gap: var(--space-4); align-content: start; }
+
+.crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); }
+.crumb {
+  background: none; border: 0; padding: var(--space-1) var(--space-2);
+  color: var(--accent-text); font-size: var(--text-base); border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.crumb:hover { background: var(--surface-hover); }
+.crumb.current { color: var(--text); font-weight: 500; cursor: default; }
+.sep { color: var(--text-tertiary); }
+
+
+.star { display: grid; place-items: center; width: 32px; height: 32px;
+        background: none; border: 0; border-radius: var(--radius-sm);
+        color: var(--text-tertiary); cursor: pointer; }
+.star:hover { background: var(--surface-hover); color: var(--text); }
+.star.on { color: var(--warning); }
+ /* Beside the menu, not in the top-left corner. Selection took that corner
+    when multi-select arrived, and the checkbox sits above the star with a
+    z-index — so on a phone, where the checkbox is always shown rather than
+    revealed on hover, it covered the star completely and a book could not be
+    favourited from its card at all. The two per-item actions now live together
+    on the right, and selection owns the left. */
+.card-star { position: absolute; top: var(--space-2);
+             right: calc(var(--space-2) + 32px + var(--space-1));
+             background: var(--surface); border-radius: var(--radius-sm); }
+
+.wide-only { display: contents; }
+.narrow-only { display: none; }
+
+@media (max-width: 40rem) {
+  /* One row: search takes the space, everything else is a button. */
+  .wide-only { display: none; }
+  .narrow-only { display: block; }
+  /* The spacer pushes controls right when there is room to spare; here there
+     is none, and it was stealing width from the search field. */
+  .spacer { display: none; }
+  .search { width: auto; flex: 1; }
+  .upload :deep(.label) { display: none; }
+  .upload { width: var(--tap-target); padding: 0; }
+}
+
+.toolbar { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; }
+.search { position: relative; display: flex; align-items: center; width: min(20rem, 100%); }
+.search > svg { position: absolute; left: var(--space-3); color: var(--text-tertiary); }
+.search input { padding-left: calc(var(--space-3) * 2 + 16px); }
+.spacer { flex: 1; }
+
+.batches { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.batches li { display: flex; align-items: center; gap: var(--space-3);
+              padding: var(--space-3) var(--space-4); color: var(--text-secondary); }
+.batch-body { display: flex; flex-direction: column; }
+.batch-body strong { color: var(--text); font-size: var(--text-base); }
+.batch-body span { font-size: var(--text-sm); }
+
+/* -- list -------------------------------------------------------------- */
+/* A flex column purely so `order` works: the markup keeps folders first, and
+   the "files first" sort flips the two blocks without duplicating either. */
+.listing { display: flex; flex-direction: column; overflow: hidden; }
+.row {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) 8rem 5rem 32px 40px;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+.row:last-child { border-bottom: 0; }
+.row:not(.head):hover { background: var(--surface-hover); }
+.row[draggable="true"] { cursor: grab; }
+.row.drop-into, .card.drop-into {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background: var(--accent-soft);
+}
+.row.head {
+  font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--text-tertiary); background: var(--surface-sunken); padding-block: var(--space-2);
+}
+.cell { min-width: 0; font-size: var(--text-base); }
+.name {
+  display: flex; align-items: center; gap: var(--space-3);
+  background: none; border: 0; padding: var(--space-1) 0; text-align: left;
+  color: var(--text); text-decoration: none; cursor: pointer; min-width: 0;
+}
+.name:hover .label { color: var(--accent-text); }
+.label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-chip {
+  display: grid; place-items: center; width: 28px; height: 28px; flex: none;
+  border-radius: var(--radius-sm); background: var(--accent-soft); color: var(--accent-text);
+}
+.badge-shared {
+  flex: none; font-size: var(--text-xs); padding: 2px var(--space-2);
+  border-radius: var(--radius-full); background: var(--accent-soft); color: var(--accent-text);
+}
+.badge-warn {
+  flex: none; font-size: var(--text-xs); padding: 2px var(--space-2);
+  border-radius: var(--radius-full); background: var(--danger-soft); color: var(--danger-text);
+}
+
+/* -- cards ------------------------------------------------------------- */
+.cards {
+  display: grid;
+  gap: var(--space-4);
+  /* A default, not just a fallback: if a modifier class is ever missing the
+     grid would otherwise be one full-width column, and a cover at
+     aspect-ratio 1/1.414 would stand taller than the viewport. */
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+}
+.cards.grid { grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); }
+.cards.large { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+/* Belt and braces: nothing in this grid may grow past a sensible card. */
+.cards > .card { max-width: 320px; }
+.card { position: relative; padding: var(--space-3); transition: box-shadow var(--duration) var(--ease); }
+.card:hover { box-shadow: var(--shadow-md); }
+.listing { display: flex; flex-direction: column; gap: var(--space-5); }
+
+/* Wider and shorter than a cover, sized so a desktop shows four across. */
+.folders {
+  display: grid; gap: var(--space-3);
+  grid-template-columns: repeat(auto-fill, minmax(232px, 1fr));
+}
+
+/* A folder is not a book, so it stops being book-shaped: the mosaic sits
+   beside the name instead of standing in for a cover. */
+.folder-card { align-self: start; }
+.folder-card .card-open { display: flex; align-items: center; gap: var(--space-3); }
+.folder-card .card-body { min-width: 0; display: grid; gap: 2px; text-align: left; }
+
+/* Where you got to reads as progress, not as metadata. */
+.card-meta.reading { color: var(--accent-text); }
+
+.card-open {
+  display: grid; gap: var(--space-2); width: 100%;
+  background: none; border: 0; padding: 0; text-align: left;
+  color: inherit; text-decoration: none; cursor: pointer;
+}
+.card-title {
+  font-size: var(--text-base); font-weight: 500;
+  display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2;
+  -webkit-box-orient: vertical; overflow: hidden;
+}
+.card-meta { font-size: var(--text-xs); }
+.card-menu { position: absolute; top: var(--space-2); right: var(--space-2);
+             background: var(--surface); border-radius: var(--radius-sm); }
+/* In a row the checkbox and the menu sit in the row, not on top of it. They
+   were absolutely positioned for a card whose cover filled it; here the mosaic
+   is in the top-left corner the checkbox was claiming, and on a phone — where
+   selection is always visible rather than revealed on hover — it covered it. */
+.folder-card { display: flex; align-items: center; gap: var(--space-2); }
+.folder-card .card-pick,
+.folder-card .card-menu { position: static; flex: none; }
+.folder-card .card-open { flex: 1; min-width: 0; align-content: start; }
+
+/* -- skeleton ----------------------------------------------------------- */
+.skeleton { pointer-events: none; }
+.skeleton-cover { aspect-ratio: 1 / 1.414; border-radius: var(--radius-sm);
+                  background: var(--surface-sunken); }
+.skeleton-line { height: 12px; margin-top: var(--space-3); border-radius: var(--radius-full);
+                 background: var(--surface-sunken); }
+
+/* -- dropzone ----------------------------------------------------------- */
+.dropzone {
+  position: fixed; inset: 0; z-index: 40; display: grid; place-items: center;
+  padding: var(--space-5); background: rgb(20 19 16 / 45%);
+  pointer-events: none;
+}
+.dropzone-inner {
+  display: grid; justify-items: center; gap: var(--space-2);
+  padding: var(--space-7) var(--space-6);
+  width: min(30rem, 100%);
+  border: 2px dashed var(--accent); border-radius: var(--radius-lg);
+  background: var(--surface); color: var(--accent-text);
+}
+.dropzone-inner strong { color: var(--text); }
+
+@media (max-width: 46rem) {
+  .row { grid-template-columns: 30px minmax(0, 1fr) 32px 40px; }
+  .row > .cell:nth-child(3), .row > .cell:nth-child(4),
+  .row.head > span:nth-child(3), .row.head > span:nth-child(4) { display: none; }
+  .topbar { padding-inline: max(var(--space-4), env(safe-area-inset-left))
+                            max(var(--space-4), env(safe-area-inset-right)); }
+  .who { display: none; }
+}
+
+/* On a phone the bar ran past the screen: three labelled links plus a sign-out
+   button want about 330px of the 375 available, and the brand takes the rest.
+   Nothing shrank or wrapped, so the *document* became 525px wide — which is
+   why the whole page looked misaligned rather than merely cramped.
+
+   The labels go and the icons stay. The words remain in the markup for screen
+   readers, and each link keeps a 40px target. */
+@media (max-width: 30rem) {
+  .topbar { padding-inline: max(var(--space-3), env(safe-area-inset-left))
+                            max(var(--space-3), env(safe-area-inset-right));
+            gap: var(--space-2); }
+  .brand strong { font-size: var(--text-base); }
+  .account { gap: var(--space-1); }
+  .quiet-link {
+    min-width: 40px; min-height: 40px;
+    justify-content: center; border-radius: var(--radius-sm);
+  }
+  /* :deep for the button, because its label lives inside AppButton and a
+     scoped rule stops at the component boundary — the first attempt at this
+     silently did nothing and made the bar wider, not narrower. */
+  .quiet-link .label,
+  .sign-out :deep(.label) {
+    position: absolute; width: 1px; height: 1px;
+    padding: 0; margin: -1px; overflow: hidden;
+    clip-path: inset(50%); white-space: nowrap; border: 0;
+  }
+  .sign-out { min-width: 40px; min-height: 40px; justify-content: center; }
+}
+
+/* -- selection ----------------------------------------------------------- */
+/* The whole cell is the target, not just the box inside it. A 16px checkbox
+   is under WCAG 2.2's 24px minimum (SC 2.5.8) and is a genuinely awkward thing
+   to hit with a thumb; the cell was already 30px wide and paying for the
+   space. */
+.pick { display: grid; place-items: center; min-height: 32px; cursor: pointer; }
+.pick input { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
+
+.row.is-selected, .card.is-selected { background: var(--accent-soft); }
+.card.is-selected { box-shadow: 0 0 0 2px var(--accent); }
+
+/* Out of the way until it is wanted: a checkbox on every card at rest turns a
+   library into a form. Hover, keyboard focus, and being ticked all reveal it. */
+.card-pick {
+  position: absolute; top: var(--space-2); left: var(--space-2); z-index: 1;
+  display: grid; place-items: center;
+  /* 30/24 rather than 24/15: the checkbox itself is the focusable target, so it
+     is the thing that has to meet WCAG 2.2's 24px minimum — sizing only the
+     label around it left a 15px hit area. */
+  width: 30px; height: 30px; border-radius: var(--radius-sm);
+  background: var(--surface); box-shadow: var(--shadow-sm);
+  opacity: 0; transition: opacity var(--duration) var(--ease);
+  cursor: pointer;
+}
+.card:hover .card-pick,
+.card-pick:focus-within,
+.card-pick.on { opacity: 1; }
+.card-pick input { width: 24px; height: 24px; accent-color: var(--accent); cursor: pointer; }
+
+/* Touch has no hover, so there would be no way to reach it at all. */
+@media (hover: none) {
+  .card-pick { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-pick { transition: none; }
+}
+
+/* -- upload progress ----------------------------------------------------- */
+.upload-progress { display: grid; gap: var(--space-2); padding: var(--space-3);
+                   margin-bottom: var(--space-3); }
+.upload-head { display: flex; justify-content: space-between; align-items: baseline;
+               gap: var(--space-3); flex-wrap: wrap; }
+.upload-progress .meter { height: 8px; border-radius: var(--radius-full);
+                          background: var(--surface-sunken); overflow: hidden; }
+.upload-progress .fill { display: block; height: 100%; background: var(--accent);
+                         border-radius: var(--radius-full);
+                         transition: width var(--duration) var(--ease); }
+.upload-progress .hint { font-size: var(--text-xs); }
+
+@media (prefers-reduced-motion: reduce) { .upload-progress .fill { transition: none; } }
+</style>

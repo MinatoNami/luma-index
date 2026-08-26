@@ -14,6 +14,23 @@ export interface Folder {
   expires_at: string | null
 }
 
+/** A collection, as a book reports the ones it is in. */
+export interface CollectionRef {
+  id: number
+  name: string
+}
+
+/**
+ * One book, on a page of its own.
+ *
+ * The two extra fields cost a query each, so the listing does not carry them
+ * and neither does what a reader of a shared book is told.
+ */
+export interface BookDetail extends Book {
+  collections: CollectionRef[]
+  annotations: { bookmarks: number; highlights: number; notes: number }
+}
+
 export interface BookSource {
   original_filename: string
   content_type: string
@@ -42,6 +59,8 @@ export interface Book {
   deleted_at: string | null
   /** When the trash will destroy this, or null if never. */
   expires_at: string | null
+  created_at: string
+  updated_at: string
 }
 
 export interface UploadBatch {
@@ -95,7 +114,7 @@ export function useLibrary() {
 
   async function listBooks(
     parent: number | null,
-    options: { search?: string; sort?: string; limit?: number; offset?: number } = {},
+    options: { search?: string; sort?: string; view?: string; limit?: number; offset?: number } = {},
   ): Promise<Page<Book>> {
     return page(await api<Envelope<Book>>('/library/books/', {
       params: { folder: folderParam(parent), ...options },
@@ -228,6 +247,20 @@ export function useLibrary() {
     }>('/library/bulk/', { method: 'POST', body: payload })
   }
 
+  /**
+   * Books you are part way through, most recently opened first.
+   *
+   * Its own endpoint rather than a ?view=, and deliberately not paginated: the
+   * server caps it at 24, which is already more than anyone is reading.
+   */
+  async function book(id: number): Promise<BookDetail> {
+    return await api<BookDetail>(`/library/books/${id}/`)
+  }
+
+  async function continueReading(): Promise<Book[]> {
+    return await api<Book[]>('/library/continue-reading/')
+  }
+
   async function storage() {
     return await api<{
       free_bytes: number
@@ -242,7 +275,7 @@ export function useLibrary() {
     listFolders, listBooks, folderDetail,
     createFolder, updateFolder, updateBook,
     trashFolder, trashBook, restoreFolder, restoreBook, deleteForever, listTrash,
-    upload, batch, storage, bulk,
+    upload, batch, storage, bulk, continueReading, book,
   }
 }
 

@@ -42,9 +42,12 @@ async function clickIfPresent(page, name) {
 /** Content height in CSS pixels, so a shot is not mostly empty page. */
 async function contentHeight(page, pad = 28) {
   return page.evaluate((p) => {
-    const cards = [...document.querySelectorAll('.card, article, [class*="card"]')]
-    const bottom = cards.reduce((m, el) => Math.max(m, el.getBoundingClientRect().bottom), 0)
-    return Math.ceil(Math.min(window.innerHeight, (bottom || window.innerHeight) + p))
+    // The page's own content box, not a guess from card class names — one
+    // page's ".progress-card" is not the last thing on it, and cropping to it
+    // cut the shot off a third of the way down.
+    const main = document.querySelector('main') ?? document.body
+    const bottom = main.getBoundingClientRect().top + main.scrollHeight
+    return Math.ceil(Math.min(window.innerHeight, bottom + p))
   }, pad)
 }
 
@@ -71,11 +74,33 @@ const desktop = await browser.newContext({
 })
 await desktop.addCookies(cookie())
 const page = await desktop.newPage()
+// The landing page: where you were, not what you have.
 await page.goto(`${BASE}/`, { waitUntil: 'networkidle' })
+await themeApplied(page)
+await imagesSettled(page)
+await shot(page, 'home', 1440)
+
+await page.goto(`${BASE}/library`, { waitUntil: 'networkidle' })
 await themeApplied(page)
 await clickIfPresent(page, 'Grid')
 await imagesSettled(page)
 await shot(page, 'library', 1440)
+
+// The reader, with a page actually painted.
+await page.goto(`${BASE}/books/${process.env.BOOK_ID}`, { waitUntil: 'networkidle' })
+await page.waitForTimeout(3500)
+// Opening a book restores where you were, which scrolls, which hides the bar.
+// Photographing the chrome means putting it back first.
+await page.locator('.viewport').evaluate((el) => { el.scrollTop = 0 })
+await page.waitForTimeout(900)
+await page.screenshot({ path: `${OUT}/reader.png`, clip: { x: 0, y: 0, width: 1440, height: 900 } })
+console.log('  wrote reader.png')
+
+// One book on a page of its own.
+await page.goto(`${BASE}/books/${process.env.BOOK_ID}/details`, { waitUntil: 'networkidle' })
+await themeApplied(page)
+await imagesSettled(page)
+await shot(page, 'book-detail', 1440)
 
 // The phone, which is where the layout was actually settled. Still dark.
 const phone = await browser.newContext({
@@ -84,7 +109,7 @@ const phone = await browser.newContext({
 })
 await phone.addCookies(cookie())
 const small = await phone.newPage()
-await small.goto(`${BASE}/`, { waitUntil: 'networkidle' })
+await small.goto(`${BASE}/library`, { waitUntil: 'networkidle' })
 await themeApplied(small)
 await clickIfPresent(small, 'Grid')
 await imagesSettled(small)

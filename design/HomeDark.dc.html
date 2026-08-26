@@ -1,0 +1,211 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: #A5A3FF; text-decoration: none; } a:hover { color: #9E9CFF; }
+    * { box-sizing: border-box; }
+  </style>
+</helmet>
+
+<div style="width: 1440px; height: 900px; display: flex; background: #151417; color: #F2F0EC; overflow: hidden;">
+
+  <aside style="width: 232px; flex: none; display: flex; flex-direction: column; background: #1D1C20; border-right: 1px solid #2E2C33;">
+    <div style="display: flex; align-items: center; gap: 10px; padding: 20px 20px 18px;">
+      <div style="width: 26px; height: 26px; border-radius: 6px; background: #8E8CFF; display: grid; place-items: center;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#14131A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h9a3 3 0 0 1 3 3v13a2 2 0 0 0-2-2H4z"/><path d="M20 4h-4v14h4z"/></svg>
+      </div>
+      <span style="font-size: 16px; font-weight: 600; letter-spacing: -0.01em;">LumaIndex</span>
+    </div>
+    <nav style="display: flex; flex-direction: column; gap: 2px; padding: 0 12px;">
+      <div style="display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 12px; border-radius: 8px; background: #24233A; color: #A5A3FF; font-size: 15px; font-weight: 500;">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11.5 12 4l9 7.5"/><path d="M5 10v10h14V10"/></svg>
+        <span>Reading now</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 12px; border-radius: 8px; color: #B3AEA6; font-size: 15px;">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+        <span>Library</span><span style="margin-left: auto; font-size: 12px; color: #8B8680;">35</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 12px; border-radius: 8px; color: #B3AEA6; font-size: 15px;">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2.6 5.6 6 .8-4.4 4.2 1.1 6.1L12 16.8 6.7 19.7l1.1-6.1L3.4 9.4l6-.8z"/></svg>
+        <span>Favourites</span><span style="margin-left: auto; font-size: 12px; color: #8B8680;">3</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 12px; border-radius: 8px; color: #B3AEA6; font-size: 15px;">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18"/></svg>
+        <span>Collections</span><span style="margin-left: auto; font-size: 12px; color: #8B8680;">1</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 12px; border-radius: 8px; color: #B3AEA6; font-size: 15px;">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-7"/><path d="M2 7h20v5H2z"/><path d="M12 21V7"/></svg>
+        <span>Shared with me</span>
+      </div>
+    </nav>
+    <div style="margin-top: auto; padding: 20px;">
+      <div style="display: flex; justify-content: space-between; font-size: 12px; color: #8B8680; margin-bottom: 8px;">
+        <span>Storage</span><span>653 MB of 20 GB</span>
+      </div>
+      <div style="height: 4px; border-radius: 999px; background: #111013; overflow: hidden;">
+        <div style="width: 3.2%; height: 100%; background: #8E8CFF; border-radius: 999px;"></div>
+      </div>
+    </div>
+  </aside>
+
+  <main style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
+    <header style="display: flex; align-items: center; gap: 16px; height: 64px; padding: 0 28px; background: #1D1C20; border-bottom: 1px solid #2E2C33;">
+      <div style="position: relative; display: flex; align-items: center; width: 340px;">
+        <svg style="position: absolute; left: 12px;" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8B8680" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input value="" placeholder="Search titles…" style="width: 100%; height: 36px; padding: 0 12px 0 36px; font: inherit; font-size: 15px; color: #F2F0EC; background: #151417; border: 1px solid #2E2C33; border-radius: 8px; outline: none;">
+      </div>
+      <div style="flex: 1;"></div>
+      <span style="display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 16px; font-size: 15px; font-weight: 500; color: #14131A; background: #8E8CFF; border-radius: 6px;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2"/></svg>
+        Upload
+      </span>
+      <span style="width: 32px; height: 32px; border-radius: 999px; background: #24233A; color: #A5A3FF; display: grid; place-items: center; font-size: 13px; font-weight: 600;">L</span>
+    </header>
+
+    <div style="flex: 1; overflow: hidden; padding: 28px;">
+
+      <div style="margin-bottom: 6px;">
+        <h1 style="margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.02em;">Good evening, Lionel</h1>
+        <p style="margin: 4px 0 0; font-size: 15px; color: #B3AEA6;">You have five books on the go.</p>
+      </div>
+
+      <!-- Continue reading: the endpoint that already exists, finally on screen -->
+      <section style="margin-top: 26px;">
+        <div style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 14px;">
+          <h2 style="margin: 0; font-size: 16px; font-weight: 600;">Continue reading</h2>
+          <span style="font-size: 13px; color: #A5A3FF;">See all</span>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px;">
+
+          <div style="display: flex; gap: 16px; padding: 16px; background: #1D1C20; border: 1px solid #2E2C33; border-radius: 14px;">
+            <div style="position: relative; width: 84px; flex: none; aspect-ratio: 1 / 1.414; border-radius: 6px; background: #21425A; overflow: hidden;">
+              <div style="padding: 12px 10px; color: #F6F1EC;">
+                <div style="font-size: 11px; line-height: 1.2; font-weight: 500;">Moby-Dick</div>
+              </div>
+            </div>
+            <div style="min-width: 0; display: flex; flex-direction: column;">
+              <div style="font-size: 15px; font-weight: 500; line-height: 1.3;">Moby-Dick; or, The Whale</div>
+              <div style="font-size: 12px; color: #8B8680; margin-top: 2px;">Herman Melville</div>
+              <div style="margin-top: auto;">
+                <div style="display: flex; justify-content: space-between; font-size: 12px; color: #B3AEA6; margin-bottom: 6px;">
+                  <span>Page 31 of 94</span><span style="color: #A5A3FF; font-weight: 500;">33%</span>
+                </div>
+                <div style="height: 4px; border-radius: 999px; background: #111013; overflow: hidden;">
+                  <div style="width: 33%; height: 100%; background: #8E8CFF; border-radius: 999px;"></div>
+                </div>
+                <div style="font-size: 12px; color: #8B8680; margin-top: 8px;">Yesterday</div>
+              </div>
+            </div>
+          </div>
+
+          <div style="display: flex; gap: 16px; padding: 16px; background: #1D1C20; border: 1px solid #2E2C33; border-radius: 14px;">
+            <div style="position: relative; width: 84px; flex: none; aspect-ratio: 1 / 1.414; border-radius: 6px; background: #47433A; overflow: hidden;">
+              <div style="padding: 12px 10px; color: #F6F1EC;">
+                <div style="font-size: 11px; line-height: 1.2; font-weight: 500;">Meditations</div>
+              </div>
+            </div>
+            <div style="min-width: 0; display: flex; flex-direction: column;">
+              <div style="font-size: 15px; font-weight: 500; line-height: 1.3;">Meditations</div>
+              <div style="font-size: 12px; color: #8B8680; margin-top: 2px;">Marcus Aurelius</div>
+              <div style="margin-top: auto;">
+                <div style="display: flex; justify-content: space-between; font-size: 12px; color: #B3AEA6; margin-bottom: 6px;">
+                  <span>Page 44 of 66</span><span style="color: #A5A3FF; font-weight: 500;">67%</span>
+                </div>
+                <div style="height: 4px; border-radius: 999px; background: #111013; overflow: hidden;">
+                  <div style="width: 67%; height: 100%; background: #8E8CFF; border-radius: 999px;"></div>
+                </div>
+                <div style="font-size: 12px; color: #8B8680; margin-top: 8px;">2 days ago</div>
+              </div>
+            </div>
+          </div>
+
+          <div style="display: flex; gap: 16px; padding: 16px; background: #1D1C20; border: 1px solid #2E2C33; border-radius: 14px;">
+            <div style="position: relative; width: 84px; flex: none; aspect-ratio: 1 / 1.414; border-radius: 6px; background: #2F5232; overflow: hidden;">
+              <div style="padding: 12px 10px; color: #F6F1EC;">
+                <div style="font-size: 11px; line-height: 1.2; font-weight: 500;">Walden</div>
+              </div>
+            </div>
+            <div style="min-width: 0; display: flex; flex-direction: column;">
+              <div style="font-size: 15px; font-weight: 500; line-height: 1.3;">Walden</div>
+              <div style="font-size: 12px; color: #8B8680; margin-top: 2px;">Henry David Thoreau</div>
+              <div style="margin-top: auto;">
+                <div style="display: flex; justify-content: space-between; font-size: 12px; color: #B3AEA6; margin-bottom: 6px;">
+                  <span>Page 61 of 83</span><span style="color: #A5A3FF; font-weight: 500;">74%</span>
+                </div>
+                <div style="height: 4px; border-radius: 999px; background: #111013; overflow: hidden;">
+                  <div style="width: 74%; height: 100%; background: #8E8CFF; border-radius: 999px;"></div>
+                </div>
+                <div style="font-size: 12px; color: #8B8680; margin-top: 8px;">Last week</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- Recently added -->
+      <section style="margin-top: 32px;">
+        <div style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 14px;">
+          <h2 style="margin: 0; font-size: 16px; font-weight: 600;">Recently added</h2>
+          <span style="font-size: 13px; color: #A5A3FF;">See all</span>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 16px;">
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <div style="aspect-ratio: 1 / 1.414; border-radius: 6px; border: 1px solid #2E2C33; background: #6E4636; overflow: hidden; box-shadow: 0 2px 8px rgb(0 0 0 / 45%);">
+              <div style="padding: 14px 12px; color: #F6F1EC;"><div style="font-size: 13px; line-height: 1.25; font-weight: 500;">Alice's Adventures in Wonderland</div></div>
+            </div>
+            <div style="font-size: 13px; font-weight: 500; line-height: 1.3;">Alice's Adventures…</div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <div style="aspect-ratio: 1 / 1.414; border-radius: 6px; border: 1px solid #2E2C33; background: #33405C; overflow: hidden; box-shadow: 0 2px 8px rgb(0 0 0 / 45%);">
+              <div style="padding: 14px 12px; color: #F6F1EC;"><div style="font-size: 13px; line-height: 1.25; font-weight: 500;">The Adventures of Sherlock Holmes</div></div>
+            </div>
+            <div style="font-size: 13px; font-weight: 500; line-height: 1.3;">Sherlock Holmes</div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <div style="aspect-ratio: 1 / 1.414; border-radius: 6px; border: 1px solid #2E2C33; background: #2E5147; overflow: hidden; box-shadow: 0 2px 8px rgb(0 0 0 / 45%);">
+              <div style="padding: 14px 12px; color: #F6F1EC;"><div style="font-size: 13px; line-height: 1.25; font-weight: 500;">The Wind in the Willows</div></div>
+            </div>
+            <div style="font-size: 13px; font-weight: 500; line-height: 1.3;">Wind in the Willows</div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <div style="aspect-ratio: 1 / 1.414; border-radius: 6px; border: 1px solid #2E2C33; background: #3D3352; overflow: hidden; box-shadow: 0 2px 8px rgb(0 0 0 / 45%);">
+              <div style="padding: 14px 12px; color: #F6F1EC;"><div style="font-size: 13px; line-height: 1.25; font-weight: 500;">Frankenstein</div></div>
+            </div>
+            <div style="font-size: 13px; font-weight: 500; line-height: 1.3;">Frankenstein</div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <div style="aspect-ratio: 1 / 1.414; border-radius: 6px; border: 1px solid #2E2C33; background: #2F5340; overflow: hidden; box-shadow: 0 2px 8px rgb(0 0 0 / 45%);">
+              <div style="padding: 14px 12px; color: #F6F1EC;"><div style="font-size: 13px; line-height: 1.25; font-weight: 500;">The Time Machine</div></div>
+            </div>
+            <div style="font-size: 13px; font-weight: 500; line-height: 1.3;">The Time Machine</div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <div style="aspect-ratio: 1 / 1.414; border-radius: 6px; border: 1px solid #2E2C33; background: #61332E; overflow: hidden; box-shadow: 0 2px 8px rgb(0 0 0 / 45%);">
+              <div style="padding: 14px 12px; color: #F6F1EC;"><div style="font-size: 13px; line-height: 1.25; font-weight: 500;">The Art of War</div></div>
+            </div>
+            <div style="font-size: 13px; font-weight: 500; line-height: 1.3;">The Art of War</div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <div style="aspect-ratio: 1 / 1.414; border-radius: 6px; border: 1px solid #2E2C33; background: #6B4230; overflow: hidden; box-shadow: 0 2px 8px rgb(0 0 0 / 45%);">
+              <div style="padding: 14px 12px; color: #F6F1EC;"><div style="font-size: 13px; line-height: 1.25; font-weight: 500;">A Room with a View</div></div>
+            </div>
+            <div style="font-size: 13px; font-weight: 500; line-height: 1.3;">A Room with a View</div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+</div>
+</x-dc>
+</body>
+</html>

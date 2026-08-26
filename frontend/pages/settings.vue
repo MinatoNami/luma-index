@@ -3,7 +3,7 @@ import { formatBytes } from '~/composables/useLibrary'
 import { applyTheme, type LibraryView, type Profile, type Theme } from '~/composables/useSettings'
 
 const account = useSettings()
-const { user, refresh: refreshSession, logout } = useAuth()
+const { refresh: refreshSession } = useAuth()
 
 const profile = ref<Profile | null>(null)
 const displayName = ref('')
@@ -121,15 +121,7 @@ const removeAccount = () => run('delete', async () => {
 
 <template>
   <div class="shell">
-    <header class="topbar">
-      <div class="brand"><AppLogo :size="24" /><strong>LumaIndex</strong></div>
-      <div class="account">
-        <NuxtLink class="quiet-link" to="/">Back to library</NuxtLink>
-        <AppButton variant="ghost" size="sm" @click="logout">Sign out</AppButton>
-      </div>
-    </header>
-
-    <main class="wrap">
+<main class="wrap">
       <h1>Settings</h1>
 
       <!-- Profile -->
@@ -321,22 +313,6 @@ const removeAccount = () => run('delete', async () => {
 
 <style scoped>
 .shell { min-height: 100dvh; }
-.topbar {
-  display: flex; align-items: center; justify-content: space-between; gap: var(--space-4);
-  /* max(), not the bare space: the viewport is declared viewport-fit=cover, so
-     on a notched phone — and in particular once this is on the Home Screen and
-     runs without Safari's chrome — the bar is drawn under the status bar.
-     Written here rather than in main.css because a scoped rule carries an
-     attribute selector and outranks a global `.topbar`, and this shorthand
-     would reset padding-top even if it did not. */
-  padding: max(var(--space-3), env(safe-area-inset-top))
-           max(var(--space-5), env(safe-area-inset-right))
-           var(--space-3)
-           max(var(--space-5), env(safe-area-inset-left));
-  background: var(--surface); border-bottom: 1px solid var(--border);
-}
-.brand { display: flex; align-items: center; gap: var(--space-3); font-size: var(--text-md); }
-.account { display: flex; align-items: center; gap: var(--space-3); }
 .quiet-link { color: var(--text-secondary); text-decoration: none; }
 .quiet-link:hover { color: var(--text); }
 

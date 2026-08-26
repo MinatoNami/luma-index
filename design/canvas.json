@@ -1,0 +1,30 @@
+{
+  "pages": [
+    { "id": "page-1", "name": "Light" },
+    { "id": "page-2", "name": "Dark" }
+  ],
+  "artboards": [
+    { "file": "Home.dc.html",           "page": "page-1", "x": 0,    "y": 0,    "w": 1440, "h": 900, "title": "Reading now" },
+    { "file": "Main.dc.html",           "page": "page-1", "x": 1560, "y": 0,    "w": 1440, "h": 900, "title": "Library" },
+    { "file": "Phone.dc.html",          "page": "page-1", "x": 3120, "y": 0,    "w": 390,  "h": 844, "title": "Library — phone" },
+    { "file": "Reader.dc.html",         "page": "page-1", "x": 0,    "y": 1060, "w": 1440, "h": 900, "title": "Reader" },
+    { "file": "BookDetail.dc.html",     "page": "page-1", "x": 1560, "y": 1060, "w": 1440, "h": 900, "title": "Book detail" },
+
+    { "file": "HomeDark.dc.html",       "page": "page-2", "x": 0,    "y": 0,    "w": 1440, "h": 900, "title": "Reading now" },
+    { "file": "MainDark.dc.html",       "page": "page-2", "x": 1560, "y": 0,    "w": 1440, "h": 900, "title": "Library" },
+    { "file": "PhoneDark.dc.html",      "page": "page-2", "x": 3120, "y": 0,    "w": 390,  "h": 844, "title": "Library — phone" },
+    { "file": "ReaderDark.dc.html",     "page": "page-2", "x": 0,    "y": 1060, "w": 1440, "h": 900, "title": "Reader" },
+    { "file": "BookDetailDark.dc.html", "page": "page-2", "x": 1560, "y": 1060, "w": 1440, "h": 900, "title": "Book detail" }
+  ],
+  "annotations": [
+    { "id": "thesis", "page": "page-1", "x": 0, "y": -150, "w": 700,
+      "text": "Same tokens as tokens.css — nothing invented.\nThe change is where the chrome goes: a left rail on desktop and a tab bar on phone, so the top of every screen is content instead of controls." },
+    { "id": "phone-note", "page": "page-1", "x": 3120, "y": -150, "w": 390,
+      "text": "Five rows of controls became one.\nToday ~55% of a 390px screen is chrome before the first cover." },
+    { "id": "dark-note", "page": "page-2", "x": 0, "y": -170, "w": 700,
+      "text": "A token swap, exactly as the app does it — every value is the dark counterpart already defined in tokens.css.\nTwo things deliberately do not invert: cover artwork, and the rendered PDF page (PDF.js paints the real document, which is white paper).\nDepth comes from borders here rather than shadow, per the note in tokens.css." },
+    { "id": "dark-phone-note", "page": "page-2", "x": 3120, "y": -150, "w": 390,
+      "text": "This is the theme your instance actually runs." }
+  ],
+  "launch": { "view": "canvas", "page": "page-2" }
+}

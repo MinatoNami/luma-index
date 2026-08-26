@@ -18,6 +18,14 @@ const loaded = ref(false)
 const image = ref<HTMLImageElement | null>(null)
 
 const pending = computed(() => !props.book.thumbnail_path)
+
+const percent = computed(() => {
+  const value = props.book.progress?.percentage ?? 0
+  return Math.max(0, Math.min(100, value))
+})
+// Nothing to say about a book nobody has opened, and no room to say it on a
+// thumbnail. A finished book keeps a full bar: that is information too.
+const showProgress = computed(() => props.size !== 'sm' && percent.value > 0)
 const src = computed(() => `/api/library/books/${props.book.id}/thumbnail`)
 
 /**
@@ -88,6 +96,15 @@ watch(() => props.book.thumbnail_path, async () => {
       </span>
     </div>
     <div v-else-if="!loaded" class="shimmer" aria-hidden="true" />
+
+    <!-- How far in you are, on the thing you recognise the book by. It was
+         only ever in a text column before, which is a place you read rather
+         than glance at. Hidden at sm: a 28px cover has no room for it. -->
+    <div v-if="showProgress" class="progress" role="progressbar"
+         :aria-valuenow="Math.round(percent)" aria-valuemin="0" aria-valuemax="100"
+         :aria-label="`${Math.round(percent)}% read`">
+      <div class="read" :style="{ width: `${percent}%` }" />
+    </div>
   </div>
 </template>
 
@@ -127,6 +144,14 @@ img.loaded { opacity: 1; }
   background-size: 200% 100%;
   animation: shimmer 1.4s linear infinite;
 }
+
+/* Sits on the artwork, so the track is a scrim rather than a token colour: a
+   surface colour would vanish into a pale cover and shout on a dark one. */
+.progress {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  height: 3px; background: rgb(0 0 0 / 28%);
+}
+.read { height: 100%; background: var(--accent); }
 
 @keyframes shimmer { to { background-position: -200% 0; } }
 
