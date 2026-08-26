@@ -72,7 +72,7 @@ const isEmpty = computed(() => !busy.value && !folders.value.length && !books.va
   <main class="wrap">
     <header>
       <h1>Trash</h1>
-      <NuxtLink class="quiet-link" to="/">Back to library</NuxtLink>
+      <NuxtLink class="quiet-link" to="/library">Back to library</NuxtLink>
     </header>
 
     <p v-if="error" class="notice notice-error" role="alert">

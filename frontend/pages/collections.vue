@@ -74,7 +74,7 @@ function deleteCollection(collection: Collection) {
 
       <div v-if="list?.length" class="listing panel">
         <div v-for="collection in list" :key="collection.id" class="row">
-          <NuxtLink class="name" :to="`/?collection=${collection.id}`">
+          <NuxtLink class="name" :to="`/library?collection=${collection.id}`">
             <span class="chip"><AppIcon name="collection" :size="16" /></span>
             <span class="label">{{ collection.path }}</span>
           </NuxtLink>

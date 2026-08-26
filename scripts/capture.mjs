@@ -71,7 +71,13 @@ const desktop = await browser.newContext({
 })
 await desktop.addCookies(cookie())
 const page = await desktop.newPage()
+// The landing page: where you were, not what you have.
 await page.goto(`${BASE}/`, { waitUntil: 'networkidle' })
+await themeApplied(page)
+await imagesSettled(page)
+await shot(page, 'home', 1440)
+
+await page.goto(`${BASE}/library`, { waitUntil: 'networkidle' })
 await themeApplied(page)
 await clickIfPresent(page, 'Grid')
 await imagesSettled(page)
@@ -84,7 +90,7 @@ const phone = await browser.newContext({
 })
 await phone.addCookies(cookie())
 const small = await phone.newPage()
-await small.goto(`${BASE}/`, { waitUntil: 'networkidle' })
+await small.goto(`${BASE}/library`, { waitUntil: 'networkidle' })
 await themeApplied(small)
 await clickIfPresent(small, 'Grid')
 await imagesSettled(small)

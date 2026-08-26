@@ -39,10 +39,15 @@ instance. These are the PRD's non-goals (§42).
 
 ## Screenshots
 
+![Reading now, the landing page](docs/screenshots/home.png)
+
+LumaIndex opens on what you are part way through, not on a folder browser.
+
 ![The library at desktop width](docs/screenshots/library.png)
 
 Folders wear a mosaic of the covers inside them. No composited folder image
 exists anywhere, so nothing needs invalidating when a folder's contents change.
+How far into a book you are rides on its cover, where you are already looking.
 
 <img src="docs/screenshots/phone.png" alt="The library on a phone" width="360">
 

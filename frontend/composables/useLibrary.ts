@@ -95,7 +95,7 @@ export function useLibrary() {
 
   async function listBooks(
     parent: number | null,
-    options: { search?: string; sort?: string; limit?: number; offset?: number } = {},
+    options: { search?: string; sort?: string; view?: string; limit?: number; offset?: number } = {},
   ): Promise<Page<Book>> {
     return page(await api<Envelope<Book>>('/library/books/', {
       params: { folder: folderParam(parent), ...options },
@@ -228,6 +228,16 @@ export function useLibrary() {
     }>('/library/bulk/', { method: 'POST', body: payload })
   }
 
+  /**
+   * Books you are part way through, most recently opened first.
+   *
+   * Its own endpoint rather than a ?view=, and deliberately not paginated: the
+   * server caps it at 24, which is already more than anyone is reading.
+   */
+  async function continueReading(): Promise<Book[]> {
+    return await api<Book[]>('/library/continue-reading/')
+  }
+
   async function storage() {
     return await api<{
       free_bytes: number
@@ -242,7 +252,7 @@ export function useLibrary() {
     listFolders, listBooks, folderDetail,
     createFolder, updateFolder, updateBook,
     trashFolder, trashBook, restoreFolder, restoreBook, deleteForever, listTrash,
-    upload, batch, storage, bulk,
+    upload, batch, storage, bulk, continueReading,
   }
 }
 

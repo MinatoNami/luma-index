@@ -52,10 +52,11 @@ interface Section {
 }
 
 const sections: Section[] = [
-  { label: 'Library', icon: 'folder', to: '/', tab: true },
-  { label: 'Favourites', icon: 'star', to: '/?view=favourites', tab: true },
-  { label: 'Recent', icon: 'clock', to: '/?view=recent' },
-  { label: 'Unsorted', icon: 'file', to: '/?view=unsorted' },
+  { label: 'Reading now', icon: 'clock', to: '/', tab: true },
+  { label: 'Library', icon: 'folder', to: '/library', tab: true },
+  { label: 'Favourites', icon: 'star', to: '/library?view=favourites', tab: true },
+  { label: 'Recent', icon: 'inbox', to: '/library?view=recent' },
+  { label: 'Unsorted', icon: 'file', to: '/library?view=unsorted' },
   { label: 'Collections', icon: 'collection', to: '/collections', tab: true },
   { label: 'Shared', icon: 'inbox', to: '/shared' },
   { label: 'Trash', icon: 'trash', to: '/trash' },
@@ -78,7 +79,7 @@ function isCurrent(to: string): boolean {
   const view = new URLSearchParams(query ?? '').get('view')
   const current = typeof route.query.view === 'string' ? route.query.view : null
   // A collection is its own place, not the plain library listing.
-  if (path === '/' && !view) return !current && !route.query.collection
+  if (path === '/library' && !view) return !current && !route.query.collection
   return current === view
 }
 </script>
