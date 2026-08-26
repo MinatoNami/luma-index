@@ -3,6 +3,7 @@ import { formatBytes, type Book, type Folder, type UploadBatch } from '~/composa
 import type { ViewMode } from '~/components/ViewToggle.vue'
 import type { SortKey } from '~/components/SortMenu.vue'
 import type { RowAction } from '~/components/RowMenu.vue'
+import type { SearchHit } from '~/composables/useLibrary'
 
 const library = useLibrary()
 const route = useRoute()
@@ -573,6 +574,35 @@ const toolbarOverflow = computed<RowAction[]>(() => [
   { label: 'New folder', icon: 'folder-plus', run: newFolder },
 ])
 
+/**
+ * Hits inside books, alongside the title filter rather than instead of it.
+ *
+ * Two different questions share one box: "which book is this" and "where did I
+ * read that". The first filters the grid as you type, as it always has; the
+ * second is a separate request, so it waits until you have typed enough to
+ * mean something.
+ */
+const insideHits = ref<SearchHit[]>([])
+const searchingInside = ref(false)
+const MIN_TERM = 3
+
+watch(search, (term) => {
+  const q = term.trim()
+  if (q.length < MIN_TERM) { insideHits.value = []; return }
+  searchingInside.value = true
+  // The same debounce the listing uses; the request is the expensive half.
+  window.setTimeout(async () => {
+    if (search.value.trim() !== q) return
+    try {
+      insideHits.value = await library.searchInside(q)
+    } catch {
+      insideHits.value = []
+    } finally {
+      searchingInside.value = false
+    }
+  }, 300)
+})
+
 const isEmpty = computed(() => !folders.value.length && !books.value.length)
 
 // The API caps a listing. Saying so is the whole point of the cap: a hundred
@@ -843,6 +873,32 @@ function itemLabel(folder: Folder): string {
         </div>
       </div>
 
+      <section v-if="search.trim().length >= 3" class="inside" aria-labelledby="inside-heading">
+        <h2 id="inside-heading">
+          Inside books
+          <span v-if="insideHits.length" class="tertiary">{{ insideHits.length }}</span>
+        </h2>
+
+        <p v-if="searchingInside && !insideHits.length" class="tertiary">Looking…</p>
+        <p v-else-if="!insideHits.length" class="tertiary">
+          No pages contain that. Scanned books have no text to search.
+        </p>
+
+        <ul v-else class="hits">
+          <li v-for="hit in insideHits" :key="`${hit.book.id}-${hit.page}`">
+            <NuxtLink class="hit" :to="`/books/${hit.book.id}?page=${hit.page + 1}`">
+              <span class="hit-where">
+                <strong>{{ hit.book.title }}</strong>
+                <span class="tertiary">Page {{ hit.page + 1 }}</span>
+              </span>
+              <!-- The server marks the match; it is the only HTML here and it
+                   comes from ts_headline, not from anything a user typed. -->
+              <span class="hit-snippet" v-html="hit.snippet" />
+            </NuxtLink>
+          </li>
+        </ul>
+      </section>
+
       <div v-if="truncated" class="truncation">
         <p class="tertiary">Showing {{ shown }} of {{ held }}</p>
         <AppButton v-if="books.length < (data?.bookTotal ?? 0)"
@@ -895,6 +951,28 @@ function itemLabel(folder: Folder): string {
 </template>
 
 <style scoped>
+.inside { margin-top: var(--space-6); }
+.inside h2 {
+  display: flex; align-items: baseline; gap: var(--space-2);
+  margin: 0 0 var(--space-3); font-size: var(--text-xs); font-weight: 600;
+  letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-tertiary);
+}
+.hits { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.hit {
+  display: grid; gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); color: inherit; text-decoration: none;
+}
+.hit:hover { background: var(--surface-hover); }
+.hit-where { display: flex; align-items: baseline; gap: var(--space-2); font-size: var(--text-base); }
+.hit-where strong { font-weight: 500; }
+.hit-snippet { font-size: var(--text-sm); color: var(--text-secondary); line-height: 1.5; }
+.hit-snippet :deep(mark) {
+  background: var(--accent-soft); color: var(--accent-text);
+  border-radius: 3px; padding: 0 2px;
+}
+
 .truncation {
   display: flex;
   flex-direction: column;

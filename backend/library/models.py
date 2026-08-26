@@ -17,6 +17,8 @@ may be the only copy the user has, so an accidental click must be recoverable.
 from __future__ import annotations
 
 from django.conf import settings
+from django.contrib.postgres.indexes import GinIndex
+from django.contrib.postgres.search import SearchVectorField
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Q
@@ -546,6 +548,39 @@ class Highlight(models.Model):
 
     def __str__(self) -> str:
         return self.selected_text[:60] or f"highlight on page {self.page + 1}"
+
+
+class BookPage(models.Model):
+    """One page's text, so that searching can say *where*.
+
+    Page-level rather than one blob per book, because a hit that only tells you
+    which book it is in leaves you to find it again yourself — in a
+    four-hundred-page scan of a reference work, that is most of the work. The
+    row carries the page number, so a result is a link to the place.
+
+    Only written for books with a text layer. A scan has nothing to index, and
+    `Book.has_text_layer` already knows which is which.
+    """
+
+    book = models.ForeignKey("Book", on_delete=models.CASCADE, related_name="pages")
+    # 0-indexed, like every other page number in this codebase.
+    page = models.PositiveIntegerField()
+    text = models.TextField()
+    # Kept on the row rather than computed per query: the whole point is that
+    # the index does the work, and a GIN index needs something to index.
+    search = SearchVectorField(null=True, editable=False)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["book", "page"], name="unique_page_text")
+        ]
+        indexes = [
+            GinIndex(fields=["search"], name="book_page_search_gin"),
+            models.Index(fields=["book", "page"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.book_id} p{self.page}"
 
 
 class PageNote(models.Model):

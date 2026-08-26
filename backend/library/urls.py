@@ -11,6 +11,7 @@ urlpatterns = [
          name="folder-restore"),
 
     path("books/", views.BookListView.as_view(), name="books"),
+    path("search/", views.BookSearchView.as_view(), name="search"),
     path("books/<int:book_id>/", views.BookDetailView.as_view(), name="book-detail"),
     path("books/<int:book_id>/restore/", views.BookRestoreView.as_view(), name="book-restore"),
     path("books/<int:book_id>/content", views.BookContentView.as_view(), name="book-content"),

@@ -26,6 +26,14 @@ export interface CollectionRef {
  * The two extra fields cost a query each, so the listing does not carry them
  * and neither does what a reader of a shared book is told.
  */
+/** A place a search term was found: which book, which page, and the sentence. */
+export interface SearchHit {
+  book: { id: number; title: string; thumbnail_path: string }
+  page: number
+  /** Contains <mark> around the match, so it is rendered as HTML. */
+  snippet: string
+}
+
 export interface BookDetail extends Book {
   collections: CollectionRef[]
   annotations: { bookmarks: number; highlights: number; notes: number }
@@ -253,6 +261,19 @@ export function useLibrary() {
    * Its own endpoint rather than a ?view=, and deliberately not paginated: the
    * server caps it at 24, which is already more than anyone is reading.
    */
+  /**
+   * Search inside books, not just their titles.
+   *
+   * Answers with places rather than books: a hit is a page, so the caller can
+   * link straight to it.
+   */
+  async function searchInside(term: string, limit = 20): Promise<SearchHit[]> {
+    if (!term.trim()) return []
+    const body = await api<{ count: number; results: SearchHit[] }>(
+      '/library/search/', { params: { q: term, limit: String(limit) } })
+    return body.results
+  }
+
   async function book(id: number): Promise<BookDetail> {
     return await api<BookDetail>(`/library/books/${id}/`)
   }
@@ -275,7 +296,7 @@ export function useLibrary() {
     listFolders, listBooks, folderDetail,
     createFolder, updateFolder, updateBook,
     trashFolder, trashBook, restoreFolder, restoreBook, deleteForever, listTrash,
-    upload, batch, storage, bulk, continueReading, book,
+    upload, batch, storage, bulk, continueReading, book, searchInside,
   }
 }
 

@@ -10,6 +10,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from .documents import DocumentError, probe, render_thumbnail
+from .fulltext import index_book
 from .models import Book, BookSource, Folder, UploadBatch
 from .quota import QuotaExceeded, already_holds, check_quota_for
 from .storage import LibraryStorage, StorageError
@@ -277,6 +278,19 @@ def process_pending_documents(*, limit: int = DOCUMENT_BATCH,
                 has_text_layer=info.has_text_layer,
                 thumbnail_path=str(thumbnail.relative_to(settings.THUMBNAIL_DIR)),
             )
+
+            # Indexing the text is the slowest thing here — it reads every page
+            # rather than a sample — so it runs after the book is already
+            # usable. A failure to index costs search on this book and nothing
+            # else, which is not worth marking the source as broken over.
+            source.book.refresh_from_db(fields=["has_text_layer"])
+            try:
+                index_book(source.book, path)
+            except Exception as exc:
+                logger.warning("text indexing failed",
+                               extra={"event": "ingest.fulltext.failed",
+                                      "book_id": source.book_id,
+                                      "reason": type(exc).__name__})
             processed += 1
         except (DocumentError, OSError) as exc:
             failed += 1

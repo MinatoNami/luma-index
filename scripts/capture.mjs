@@ -86,6 +86,14 @@ await clickIfPresent(page, 'Grid')
 await imagesSettled(page)
 await shot(page, 'library', 1440)
 
+// Searching inside books, which is the one thing the title filter cannot do.
+await page.goto(`${BASE}/library`, { waitUntil: 'networkidle' })
+await themeApplied(page)
+await page.getByPlaceholder(/search titles/i).fill('spleen')
+await page.waitForTimeout(1800)
+await imagesSettled(page)
+await shot(page, 'search', 1440)
+
 // The reader, with a page actually painted.
 await page.goto(`${BASE}/books/${process.env.BOOK_ID}`, { waitUntil: 'networkidle' })
 await page.waitForTimeout(3500)

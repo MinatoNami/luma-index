@@ -27,8 +27,11 @@ on `owner` rather than `user`, and neither it nor `CollectionBook` has the
 **Search is `icontains` over title.** Honest for a few thousand books and needs
 no extra machinery. A `pg_trgm` GIN index adds fuzzy matching for one
 migration's cost when the library gets big enough to notice; it has not.
-Full-text search over PDF *contents* is out of MVP scope (§42) — this decision
-must not drift into it.
+This note used to say full-text search over PDF *contents* was out of scope by
+§42. It is not: §42 rules out OCR and semantic/vector search, and says nothing
+about keyword search over a text layer the document already has. The
+distinction went missing here and then steered the design for months.
+Searching inside books is built — `library/fulltext.py`.
 
 **Collection nesting is capped and cycle-checked** at the same depth as folders,
 validated server-side, rejecting a parent that is a descendant of the collection

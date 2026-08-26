@@ -75,6 +75,8 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    # For SearchVectorField and the GIN index behind searching inside books.
+    "django.contrib.postgres",
     "rest_framework",
     "drf_spectacular",
     "accounts",

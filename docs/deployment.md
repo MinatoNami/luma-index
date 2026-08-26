@@ -295,6 +295,23 @@ the thumbnails:
 ./deploy/deploy.sh manage rebuild_thumbnails
 ```
 
+## Searching inside books
+
+New uploads are indexed by the worker as they are ingested. A library that
+already existed when the index did not has to be walked once:
+
+```bash
+./deploy/deploy.sh manage index_text
+```
+
+It reads every page of every book with a text layer, so it takes a while on a
+large library and is safe to interrupt — it only looks at books with nothing
+indexed, unless you pass `--all`. `--dry-run` lists what it would read.
+
+Scans are skipped: `has_text_layer` is false for them, there is no text to
+extract, and OCR is a PRD non-goal (§42). §42 rules out *semantic* search, not
+this.
+
 ## Local development
 
 ```bash

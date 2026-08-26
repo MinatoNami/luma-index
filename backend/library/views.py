@@ -17,7 +17,7 @@ from django.http import FileResponse, Http404
 from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_protect
-from drf_spectacular.utils import OpenApiResponse, extend_schema
+from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
 from rest_framework import status
 from rest_framework.parsers import FileUploadParser, FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
@@ -25,6 +25,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from . import bulk, chunked, sorting
+from .fulltext import MAX_HITS, search
 from .lifecycle import readers_of, set_visibility
 from .models import (
     Book,
@@ -294,6 +295,48 @@ class BookListView(OwnedMixin, APIView):
         rows, meta = paginate(queryset, request)
         return Response(envelope(
             BookSerializer(rows, many=True, context={"request": request}).data, meta))
+
+
+class BookSearchView(OwnedMixin, APIView):
+    """Search inside books, not just their titles.
+
+    A separate endpoint rather than another parameter on the listing, because
+    the answer is a different shape: a listing returns books, and this returns
+    places — a book, a page, and the sentence the word was in.
+    """
+
+    @extend_schema(summary="Search inside books",
+                   parameters=[
+                       OpenApiParameter("q", str, description="What to look for."),
+                       OpenApiParameter("limit", int, description="At most 50."),
+                   ],
+                   responses={200: OpenApiResponse(description="Matching pages")})
+    def get(self, request):
+        term = request.GET.get("q", "").strip()
+        if not term:
+            return Response({"count": 0, "results": []})
+
+        try:
+            asked = int(request.GET.get("limit", 20))
+        except (TypeError, ValueError):
+            asked = 20
+        limit = max(1, min(asked, MAX_HITS))
+        # readable_books, not self.books(): the latter is the owner's own
+        # library, and a shared book you can open should be a shared book you
+        # can find. This queryset is the only thing keeping the search to those
+        # two, so it is never Book.objects.
+        readable = readable_books(request.user).filter(deleted_at__isnull=True)
+        hits = search(readable, term, limit=limit)
+
+        return Response({
+            "count": len(hits),
+            "results": [{
+                "book": {"id": hit.book.pk, "title": hit.book.title,
+                         "thumbnail_path": hit.book.thumbnail_path},
+                "page": hit.page,
+                "snippet": hit.snippet,
+            } for hit in hits],
+        })
 
 
 @csrf_required

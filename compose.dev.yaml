@@ -29,6 +29,15 @@ services:
       - ./backend:/app
     command: ["python", "manage.py", "runserver", "0.0.0.0:8000"]
 
+  # The worker runs the same code as the backend and had no source mount, so a
+  # change to ingest needed a rebuild while the API hot-reloaded — which reads
+  # as "my change did nothing" rather than as a stale image.
+  worker:
+    build:
+      context: ./backend
+    volumes:
+      - ./backend:/app
+
   frontend:
     build:
       context: ./frontend

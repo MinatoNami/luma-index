@@ -9,6 +9,7 @@ at all, and none of those may take down an import (PRD §35).
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -96,6 +97,36 @@ def probe(path: Path) -> DocumentInfo:
 
         return DocumentInfo(page_count=page_count,
                             has_text_layer=characters >= TEXT_PROBE_MIN_CHARS)
+    finally:
+        document.close()
+
+
+def extract_pages(path: Path) -> Iterator[tuple[int, str]]:
+    """Every page's text, in order, for the pages that have any.
+
+    Yields nothing for a scan: `probe` has already decided whether a document
+    has a text layer, and running this over one produces a few hundred empty
+    rows and a lot of disappointment.
+
+    A page that cannot be read is skipped rather than failing the book. One
+    corrupt page in a four-hundred-page book should cost that page.
+    """
+    document = _open(path)
+    try:
+        for index in range(len(document)):
+            try:
+                page = document[index]
+                textpage = page.get_textpage()
+                text = textpage.get_text_bounded().strip()
+                textpage.close()
+                page.close()
+            except Exception as exc:
+                logger.debug("text extraction skipped a page",
+                             extra={"event": "documents.extract.page_skipped",
+                                    "page": index, "reason": type(exc).__name__})
+                continue
+            if text:
+                yield index, text
     finally:
         document.close()
 

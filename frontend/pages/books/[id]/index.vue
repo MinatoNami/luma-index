@@ -214,7 +214,21 @@ const fit = ref<FitMode>(
   settings.value?.reader_zoom === 'fit-page' ? 'fit-page' : 'fit-width',
 )
 const sidebar = ref(false)
-const page = ref((data.value?.progress.page ?? 0) + 1)
+/**
+ * Where to open.
+ *
+ * A ?page= in the URL wins over saved progress, because it is the more recent
+ * intention: it is how a search result, or a link someone sent you, says which
+ * page it meant. Without it, you land where you left off.
+ */
+const requestedPage = computed(() => {
+  const raw = route.query.page
+  const n = typeof raw === 'string' ? Number(raw) : NaN
+  return Number.isInteger(n) && n > 0 ? n - 1 : null
+})
+const openAt = computed(() => requestedPage.value ?? data.value?.progress.page ?? 0)
+
+const page = ref(openAt.value + 1)
 const totalPages = ref(data.value?.book.page_count ?? 0)
 const jumpTo = ref('')
 const readerError = ref('')
@@ -468,8 +482,9 @@ useHead({ title: computed(() => book.value ? `${book.value.title} — LumaIndex`
       <div class="stage">
         <ClientOnly>
           <PdfReader ref="reader" :src="contentUrl" :page-count="totalPages"
-                     :initial-page="data?.progress.page ?? 0"
-                     :initial-fraction="data?.progress.page_fraction ?? 0"
+                     :initial-page="openAt"
+                     :initial-fraction="requestedPage === null
+                       ? (data?.progress.page_fraction ?? 0) : 0"
                      :mode="mode" :fit="fit"
                      :highlights="notes.highlights.value"
                      @position="onPosition"
