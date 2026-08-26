@@ -5,6 +5,11 @@ import type { PDFDocumentProxy } from 'pdfjs-dist'
 
 import type { Highlight, HighlightColour, Quad } from '~/composables/useAnnotations'
 
+// Full bleed: the reader draws its own chrome, which hides on scroll, and a
+// rail down the side would take width from the page and never get out of
+// the way. Reading is the one screen that is not part of the browse shell.
+definePageMeta({ layout: false })
+
 const route = useRoute()
 const { api, ensureCsrf } = useApi()
 const { settings } = useSettings()

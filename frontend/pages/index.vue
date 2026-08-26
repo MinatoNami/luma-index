@@ -2,9 +2,9 @@
 import { formatBytes, type Book, type Folder, type UploadBatch } from '~/composables/useLibrary'
 import type { ViewMode } from '~/components/ViewToggle.vue'
 import type { SortKey } from '~/components/SortMenu.vue'
+import type { RowAction } from '~/components/RowMenu.vue'
 
 const library = useLibrary()
-const { user, logout } = useAuth()
 const route = useRoute()
 const router = useRouter()
 
@@ -70,17 +70,6 @@ const activeView = computed<LibraryView>(() => {
 })
 const activeCollection = computed(() =>
   route.query.collection ? Number(route.query.collection) : null)
-
-const VIEWS: { value: LibraryView; label: string; icon: string }[] = [
-  { value: 'files', label: 'Files', icon: 'folder' },
-  { value: 'favourites', label: 'Favourites', icon: 'star' },
-  { value: 'recent', label: 'Recent', icon: 'inbox' },
-  { value: 'unsorted', label: 'Unsorted', icon: 'file' },
-]
-
-function selectView(view: LibraryView) {
-  router.push({ query: view === 'files' ? {} : { view } })
-}
 
 async function toggleFavourite(book: Book) {
   const next = !book.is_favourite
@@ -566,6 +555,22 @@ function bookActions(book: Book) {
   ]
 }
 
+/**
+ * What the wide toolbar shows, for a screen too narrow to lay it out.
+ *
+ * The same state either way — these are not a second set of controls, just a
+ * second way to reach the first.
+ */
+const toolbarOverflow = computed<RowAction[]>(() => [
+  { label: sortDesc.value ? 'Sort ascending' : 'Sort descending',
+    icon: sortDesc.value ? 'arrow-up' : 'arrow-down',
+    run: () => { sortDesc.value = !sortDesc.value } },
+  { label: view.value === 'list' ? 'Show as grid' : 'Show as list',
+    icon: view.value === 'list' ? 'grid-view' : 'list-view',
+    run: () => { view.value = view.value === 'list' ? 'grid' : 'list' } },
+  { label: 'New folder', icon: 'folder-plus', run: newFolder },
+])
+
 const isEmpty = computed(() => !folders.value.length && !books.value.length)
 
 // The API caps a listing. Saying so is the whole point of the cap: a hundred
@@ -584,29 +589,7 @@ function itemLabel(folder: Folder): string {
 <template>
   <div class="shell" @dragenter.prevent="onDragEnter" @dragover.prevent
        @dragleave.prevent="onDragLeave" @drop.prevent="onDrop">
-    <header class="topbar">
-      <div class="brand">
-        <AppLogo :size="24" />
-        <strong>LumaIndex</strong>
-      </div>
-      <div class="account">
-        <ThemeToggle />
-        <NuxtLink class="quiet-link" to="/shared">
-          <AppIcon name="inbox" :size="16" /> <span class="label">Shared</span>
-        </NuxtLink>
-        <NuxtLink class="quiet-link" to="/trash">
-          <AppIcon name="trash" :size="16" /> <span class="label">Trash</span>
-        </NuxtLink>
-        <NuxtLink class="quiet-link" to="/settings">
-          <AppIcon name="settings" :size="16" /> <span class="label">Settings</span>
-        </NuxtLink>
-        <span class="who tertiary">{{ user?.display_name || user?.email }}</span>
-        <AppButton class="sign-out" variant="ghost" size="sm" icon="sign-out"
-                   @click="logout">Sign out</AppButton>
-      </div>
-    </header>
-
-    <main class="wrap">
+<main class="wrap">
       <!-- The subject of the page, for anyone navigating by heading. Visually
            the breadcrumb already says it, so this is not shown twice. -->
       <h1 class="sr-only">{{ currentFolder?.name || 'My library' }}</h1>
@@ -623,21 +606,6 @@ function itemLabel(folder: Folder): string {
         </template>
       </nav>
 
-      <!-- Toggle buttons in a labelled group, not a tablist. These filter the
-           listing in place; there are no tabpanels to own and no arrow-key
-           model, and the last item is a link to a different page — all three of
-           which a tablist promises a screen reader it will find. -->
-      <div class="views" role="group" aria-label="Library views">
-        <button v-for="view in VIEWS" :key="view.value" type="button"
-                :class="['chip', { active: activeView === view.value && !activeCollection }]"
-                :aria-pressed="activeView === view.value && !activeCollection"
-                @click="selectView(view.value)">
-          <AppIcon :name="view.icon" :size="15" /> {{ view.label }}
-        </button>
-        <NuxtLink class="chip" to="/collections">
-          <AppIcon name="collection" :size="15" /> Collections
-        </NuxtLink>
-      </div>
 
       <div class="toolbar">
         <div class="search">
@@ -646,10 +614,21 @@ function itemLabel(folder: Folder): string {
                  aria-label="Search titles" />
         </div>
         <div class="spacer" />
-        <SortMenu v-model="sortKey" v-model:descending="sortDesc" />
-        <ViewToggle v-model="view" />
-        <AppButton icon="folder-plus" :disabled="busy" @click="newFolder">New folder</AppButton>
-        <AppButton variant="primary" icon="upload" :loading="busy"
+        <!-- Wide screens get the controls laid out; a phone gets them in one
+             menu. Left to wrap, they cost three rows before the first cover. -->
+        <div class="wide-only">
+          <SortMenu v-model="sortKey" v-model:descending="sortDesc" />
+        </div>
+        <div class="wide-only">
+          <ViewToggle v-model="view" />
+        </div>
+        <div class="wide-only">
+          <AppButton icon="folder-plus" :disabled="busy" @click="newFolder">New folder</AppButton>
+        </div>
+        <div class="narrow-only">
+          <RowMenu :actions="toolbarOverflow" label="Sort, view and folders" />
+        </div>
+        <AppButton class="upload" variant="primary" icon="upload" :loading="busy"
                    @click="fileInput?.click()">Upload</AppButton>
         <input ref="fileInput" class="sr-only" type="file" multiple tabindex="-1"
                aria-label="Choose PDFs or a ZIP to upload"
@@ -911,30 +890,11 @@ function itemLabel(folder: Folder): string {
 
 .shell { min-height: 100dvh; display: flex; flex-direction: column; }
 
-.topbar {
-  display: flex; align-items: center; justify-content: space-between; gap: var(--space-4);
-  /* max(), not the bare space: the viewport is declared viewport-fit=cover, so
-     on a notched phone — and in particular once this is on the Home Screen and
-     runs without Safari's chrome — the bar is drawn under the status bar.
-     Written here rather than in main.css because a scoped rule carries an
-     attribute selector and outranks a global `.topbar`, and this shorthand
-     would reset padding-top even if it did not. */
-  padding: max(var(--space-3), env(safe-area-inset-top))
-           max(var(--space-5), env(safe-area-inset-right))
-           var(--space-3)
-           max(var(--space-5), env(safe-area-inset-left));
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
-  position: sticky; top: 0; z-index: 20;
-}
-.brand { display: flex; align-items: center; gap: var(--space-3); font-size: var(--text-md); }
-.account { display: flex; align-items: center; gap: var(--space-3); }
 .quiet-link {
   display: inline-flex; align-items: center; gap: var(--space-2);
   color: var(--text-secondary); text-decoration: none; font-size: var(--text-base);
 }
 .quiet-link:hover { color: var(--text); }
-.who { font-size: var(--text-sm); }
 
 .wrap { width: 100%; max-width: 72rem; margin: 0 auto;
         padding: var(--space-5); display: grid; gap: var(--space-4); align-content: start; }
@@ -949,17 +909,6 @@ function itemLabel(folder: Folder): string {
 .crumb.current { color: var(--text); font-weight: 500; cursor: default; }
 .sep { color: var(--text-tertiary); }
 
-.views { display: flex; flex-wrap: wrap; gap: var(--space-2); }
-.chip {
-  display: inline-flex; align-items: center; gap: var(--space-2);
-  padding: var(--space-1) var(--space-3); min-height: 32px;
-  background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius-full); color: var(--text-secondary);
-  font-size: var(--text-sm); text-decoration: none; cursor: pointer;
-}
-.chip:hover { background: var(--surface-hover); color: var(--text); }
-.chip.active { background: var(--accent-soft); border-color: var(--accent);
-               color: var(--accent-text); }
 
 .star { display: grid; place-items: center; width: 32px; height: 32px;
         background: none; border: 0; border-radius: var(--radius-sm);
@@ -975,6 +924,21 @@ function itemLabel(folder: Folder): string {
 .card-star { position: absolute; top: var(--space-2);
              right: calc(var(--space-2) + 32px + var(--space-1));
              background: var(--surface); border-radius: var(--radius-sm); }
+
+.wide-only { display: contents; }
+.narrow-only { display: none; }
+
+@media (max-width: 40rem) {
+  /* One row: search takes the space, everything else is a button. */
+  .wide-only { display: none; }
+  .narrow-only { display: block; }
+  /* The spacer pushes controls right when there is room to spare; here there
+     is none, and it was stealing width from the search field. */
+  .spacer { display: none; }
+  .search { width: auto; flex: 1; }
+  .upload :deep(.label) { display: none; }
+  .upload { width: var(--tap-target); padding: 0; }
+}
 
 .toolbar { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; }
 .search { position: relative; display: flex; align-items: center; width: min(20rem, 100%); }

@@ -2,7 +2,6 @@
 import { type SharedBook } from '~/composables/useLibrary'
 
 const sharing = useSharing()
-const { logout } = useAuth()
 
 const { data: books } = await useAsyncData('shared-books',
   () => sharing.sharedWithMe().catch(() => [] as SharedBook[]))
@@ -10,15 +9,7 @@ const { data: books } = await useAsyncData('shared-books',
 
 <template>
   <div class="shell">
-    <header class="topbar">
-      <div class="brand"><AppLogo :size="24" /><strong>LumaIndex</strong></div>
-      <div class="account">
-        <NuxtLink class="quiet-link" to="/">My library</NuxtLink>
-        <AppButton variant="ghost" size="sm" @click="logout">Sign out</AppButton>
-      </div>
-    </header>
-
-    <main class="wrap">
+<main class="wrap">
       <h1>Shared with me</h1>
       <p class="muted">
         Books other people on this instance have shared. Your reading position
@@ -53,20 +44,6 @@ const { data: books } = await useAsyncData('shared-books',
 
 <style scoped>
 .shell { min-height: 100dvh; }
-.topbar { display: flex; align-items: center; justify-content: space-between;
-          /* max(), not the bare space: the viewport is declared viewport-fit=cover, so
-     on a notched phone — and in particular once this is on the Home Screen and
-     runs without Safari's chrome — the bar is drawn under the status bar.
-     Written here rather than in main.css because a scoped rule carries an
-     attribute selector and outranks a global `.topbar`, and this shorthand
-     would reset padding-top even if it did not. */
-  padding: max(var(--space-3), env(safe-area-inset-top))
-           max(var(--space-5), env(safe-area-inset-right))
-           var(--space-3)
-           max(var(--space-5), env(safe-area-inset-left));
-          background: var(--surface); border-bottom: 1px solid var(--border); }
-.brand { display: flex; align-items: center; gap: var(--space-3); font-size: var(--text-md); }
-.account { display: flex; align-items: center; gap: var(--space-3); }
 .quiet-link { color: var(--text-secondary); text-decoration: none; }
 .quiet-link:hover { color: var(--text); }
 .wrap { max-width: 72rem; margin: 0 auto; padding: var(--space-5);
