@@ -78,7 +78,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: ShellCheck
-        run: shellcheck -S warning deploy/deploy.sh deploy/bootstrap.sh backend/entrypoint.sh
+        # scripts/e2e.sh is in here because it is now a safety mechanism: it
+        # refuses to run against a library that is not demo data, and a shell
+        # bug in that check fails open.
+        run: >-
+          shellcheck -S warning deploy/deploy.sh deploy/bootstrap.sh
+          backend/entrypoint.sh scripts/e2e.sh scripts/screenshots.sh
 
   compose:
     runs-on: ubuntu-latest
@@ -96,6 +101,11 @@ jobs:
     # with no healthcheck, and `caddy` missing from ALLOWED_HOSTS — each meant
     # the app could not start, and every other job stayed green throughout.
     runs-on: ubuntu-latest
+    env:
+      # Named, not inferred from the checkout directory: e2e.sh drives this
+      # project by default and refuses anything holding books that are not the
+      # demo account's, so CI and the script have to agree on the name.
+      COMPOSE_PROJECT_NAME: lumaindex-demo
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

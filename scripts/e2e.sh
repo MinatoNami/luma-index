@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 #
-# Run the reader's end-to-end tests against the development stack.
+# Run the reader's end-to-end tests against a scratch stack.
 #
 #   ./scripts/e2e.sh                 # all of them
 #   ./scripts/e2e.sh reader.spec.ts  # one file
+#
+# It opens a book in a real browser, so it drives the `lumaindex-demo` project
+# — seeded with public-domain books by scripts/demo_library.py — and never the
+# default project, which is somebody's actual library. Pointing it somewhere
+# else with COMPOSE_PROJECT is allowed; pointing it at an instance holding a
+# book that is not the demo account's is refused.
 #
 # Playwright runs in its own container with the browsers already in the image,
 # so nothing is downloaded onto this machine. It joins the compose network and
@@ -20,20 +26,41 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 step() { printf '\033[34m==>\033[0m \033[1m%s\033[0m\n' "$*"; }
 die()  { printf '\033[31m ✗ \033[0m %s\n' "$*" >&2; exit 1; }
 
-# Which stack to drive. The suite opens a real book in a real browser, so point
-# it at a scratch project seeded by scripts/demo_library.py rather than at
-# somebody's actual library:
-#
-#   COMPOSE_PROJECT=lumaindex-demo ./scripts/e2e.sh
-PROJECT="${COMPOSE_PROJECT:-}"
-compose() {
-    if [ -n "$PROJECT" ]; then docker compose -p "$PROJECT" "$@"
-    else docker compose "$@"; fi
-}
+# Defaults to the scratch project rather than to whatever `docker compose` would
+# pick, because the safe thing has to be the thing that happens when you type
+# the command with no arguments.
+PROJECT="${COMPOSE_PROJECT:-lumaindex-demo}"
+DEMO_EMAIL="reader@lumaindex.demo"
+compose() { docker compose -p "$PROJECT" "$@"; }
 
-step "Checking the stack is up"
-compose ps --format '{{.Service}} {{.Status}}' | grep -q "caddy.*healthy" \
-  || die "The dev stack is not running. Start it with: docker compose up -d"
+step "Checking the $PROJECT stack is up"
+compose ps --format '{{.Service}} {{.Status}}' | grep -q "caddy.*healthy" || die \
+"No healthy caddy in project '$PROJECT'. Bring a scratch stack up and seed it:
+
+  CADDY_HTTP_PORT=8091 docker compose -p lumaindex-demo \\
+      -f compose.yaml -f compose.dev.yaml up -d
+  docker compose -p lumaindex-demo exec -T backend \\
+      python manage.py shell < scripts/demo_library.py
+"
+
+# The project name is a convention, not a guarantee: it says nothing about what
+# is in the database it points at. This does. Deliberately no override — an
+# escape hatch here would be used by accident exactly once.
+step "Checking this is not a real library"
+FOREIGN="$(compose exec -T backend python manage.py shell -c "
+from library.models import Book
+strangers = (Book.objects.exclude(owner__email='$DEMO_EMAIL')
+             .values_list('owner__email', flat=True).distinct()[:5])
+print('FOREIGN ' + (','.join(sorted(set(strangers))) or 'none'))
+" 2>/dev/null | grep '^FOREIGN' | cut -d' ' -f2-)"
+
+[ -n "$FOREIGN" ] || die "Could not check whose books these are. Refusing to run."
+if [ "$FOREIGN" != "none" ]; then
+    die "Project '$PROJECT' holds books owned by: $FOREIGN
+
+This suite opens a book in a browser and is only ever pointed at demo data.
+Seed a scratch instance with scripts/demo_library.py and run it against that."
+fi
 
 NETWORK="$(docker inspect "$(compose ps -q caddy)" \
   --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{end}}')"
@@ -45,9 +72,11 @@ from django.contrib.auth import get_user_model, SESSION_KEY, BACKEND_SESSION_KEY
 from django.contrib.sessions.backends.db import SessionStore
 from library.models import Book
 
-user = get_user_model().objects.filter(is_superuser=True).first() or get_user_model().objects.first()
+# The demo account by name. "Any superuser" would happily sign in as a real
+# person on an instance that also happened to hold demo books.
+user = get_user_model().objects.filter(email="reader@lumaindex.demo").first()
 if user is None:
-    print("ERROR no accounts"); raise SystemExit(1)
+    print("ERROR no demo account"); raise SystemExit(1)
 
 # A book with pages to turn and, ideally, text to search.
 book = (Book.objects.filter(deleted_at__isnull=True, has_text_layer=True, page_count__gt=3).first()

@@ -319,14 +319,25 @@ ended with `exec gunicorn "$@"`, which turned the command into gunicorn flags
 and killed the container after every check had logged success.
 
 ```bash
-COMPOSE_PROJECT=lumaindex-demo ./scripts/e2e.sh
+./scripts/e2e.sh
 ```
 
-The e2e run needs a real browser: PDF.js drives rendering with
+It drives the `lumaindex-demo` project, never the default one, and refuses any
+instance holding a book that is not the demo account's — it opens a book in a
+real browser, and that should never be someone's actual reading. Bring a
+scratch stack up and seed it first:
+
+```bash
+CADDY_HTTP_PORT=8091 docker compose -p lumaindex-demo -f compose.yaml -f compose.dev.yaml up -d
+```
+
+```bash
+docker compose -p lumaindex-demo exec -T backend python manage.py shell < scripts/demo_library.py
+```
+
+The run needs a real browser: PDF.js drives rendering with
 `requestAnimationFrame`, which never fires where `visibilityState` is `hidden`,
-so headless preview panes render nothing at all. It also opens a real book from
-whichever stack it is pointed at, so point it at a scratch project seeded by
-`scripts/demo_library.py` rather than at a real library.
+so headless preview panes render nothing at all.
 
 ## Troubleshooting
 
