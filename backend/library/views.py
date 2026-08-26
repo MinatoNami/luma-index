@@ -46,6 +46,7 @@ from .quota import QuotaExceeded, ensure_room, limit_for, usage_for
 from .ranges import serve_file
 from .retention import retention_days
 from .serializers import (
+    BookDetailSerializer,
     BookmarkSerializer,
     BookSerializer,
     BulkActionSerializer,
@@ -297,12 +298,14 @@ class BookListView(OwnedMixin, APIView):
 
 @csrf_required
 class BookDetailView(OwnedMixin, APIView):
-    @extend_schema(summary="One book", responses={200: BookSerializer})
+    @extend_schema(summary="One book", responses={200: BookDetailSerializer})
     def get(self, request, book_id: int):
         book = self.get_readable_book(book_id)
-        # A non-owner gets the reader's view, which omits the owner's filename
-        # and folder path.
-        serializer = (BookSerializer if book.owner_id == request.user.pk
+        # A non-owner gets the reader's view, which omits the owner's filename,
+        # folder path and filing. The owner gets the fuller detail shape: the
+        # collections it is in and how much they have written on it, neither of
+        # which the listing carries.
+        serializer = (BookDetailSerializer if book.owner_id == request.user.pk
                       else SharedBookSerializer)
         return Response(serializer(book, context={"request": request}).data)
 

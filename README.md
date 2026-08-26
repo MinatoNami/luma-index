@@ -49,6 +49,11 @@ Folders wear a mosaic of the covers inside them. No composited folder image
 exists anywhere, so nothing needs invalidating when a folder's contents change.
 How far into a book you are rides on its cover, where you are already looking.
 
+![One book on a page of its own](docs/screenshots/book-detail.png)
+
+A book has a page of its own now, reached from a row menu or from the reader —
+never in front of opening one, because reading is the fast path.
+
 <img src="docs/screenshots/phone.png" alt="The library on a phone" width="360">
 
 On a narrow screen the top bar's labels give way to icons, and selection is

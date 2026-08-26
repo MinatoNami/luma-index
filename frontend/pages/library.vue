@@ -543,6 +543,8 @@ function bookActions(book: Book) {
     { label: book.visibility === 'shared' ? 'Stop sharing' : 'Share with instance',
       icon: 'inbox', run: () => toggleShare(book) },
     { label: 'Open', icon: 'file', run: () => navigateTo(`/books/${book.id}`) },
+    { label: 'Details', icon: 'collection',
+      run: () => navigateTo(`/books/${book.id}/details`) },
     { label: 'Download', icon: 'download',
       run: () => window.open(`/api/library/books/${book.id}/content`, '_blank') },
     { label: 'Add to collection…', icon: 'collection',

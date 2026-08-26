@@ -19,6 +19,8 @@ const book = (overrides: Partial<Book> = {}): Book => ({
   is_favourite: false,
   deleted_at: null,
   expires_at: null,
+  created_at: '2026-08-01T00:00:00Z',
+  updated_at: '2026-08-01T00:00:00Z',
   ...overrides,
 })
 

@@ -12,6 +12,7 @@ const props = defineProps<{ bookTitle: string; bookId: number }>()
 const emit = defineEmits<{ done: []; cancel: [] }>()
 
 const collections = useCollections()
+const library = useLibrary()
 
 const all = ref<Collection[]>([])
 const member = ref<Set<number>>(new Set())
@@ -20,16 +21,16 @@ const busy = ref(false)
 const error = ref('')
 
 async function load() {
-  all.value = await collections.list()
-  // Which ones already contain this book.
-  const { api } = useApi()
-  const containing = await Promise.all(all.value.map(async (c) => {
-    const books = (await api<{ results: { id: number }[] }>('/library/books/', {
-      params: { collection: String(c.id) },
-    }).catch(() => ({ results: [] }))).results
-    return books.some(b => b.id === props.bookId) ? c.id : null
-  }))
-  member.value = new Set(containing.filter((id): id is number => id !== null))
+  // Two requests, whatever the shape of the library. This used to ask every
+  // collection whether it contained this book — one request each, every one
+  // serialising up to a hundred books to answer yes or no — so a reader with
+  // twenty collections paid twenty round trips to tick a few boxes.
+  const [list, book] = await Promise.all([
+    collections.list(),
+    library.book(props.bookId),
+  ])
+  all.value = list
+  member.value = new Set(book.collections?.map(c => c.id) ?? [])
 }
 
 onMounted(load)

@@ -138,6 +138,8 @@ const barOverflow = computed(() => {
     { label: fit.value === 'fit-width' ? 'Fit page' : 'Fit width', icon: 'search',
       run: () => { fit.value = fit.value === 'fit-width' ? 'fit-page' : 'fit-width' } },
     { label: 'Fullscreen', icon: 'large-view', run: fullscreen },
+    { label: 'About this book', icon: 'collection',
+      run: () => navigateTo(`/books/${bookId.value}/details`) },
   )
   return items
 })

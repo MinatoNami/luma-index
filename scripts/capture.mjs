@@ -42,9 +42,12 @@ async function clickIfPresent(page, name) {
 /** Content height in CSS pixels, so a shot is not mostly empty page. */
 async function contentHeight(page, pad = 28) {
   return page.evaluate((p) => {
-    const cards = [...document.querySelectorAll('.card, article, [class*="card"]')]
-    const bottom = cards.reduce((m, el) => Math.max(m, el.getBoundingClientRect().bottom), 0)
-    return Math.ceil(Math.min(window.innerHeight, (bottom || window.innerHeight) + p))
+    // The page's own content box, not a guess from card class names — one
+    // page's ".progress-card" is not the last thing on it, and cropping to it
+    // cut the shot off a third of the way down.
+    const main = document.querySelector('main') ?? document.body
+    const bottom = main.getBoundingClientRect().top + main.scrollHeight
+    return Math.ceil(Math.min(window.innerHeight, bottom + p))
   }, pad)
 }
 
@@ -82,6 +85,12 @@ await themeApplied(page)
 await clickIfPresent(page, 'Grid')
 await imagesSettled(page)
 await shot(page, 'library', 1440)
+
+// One book on a page of its own.
+await page.goto(`${BASE}/books/${process.env.BOOK_ID}/details`, { waitUntil: 'networkidle' })
+await themeApplied(page)
+await imagesSettled(page)
+await shot(page, 'book-detail', 1440)
 
 // The phone, which is where the layout was actually settled. Still dark.
 const phone = await browser.newContext({
