@@ -314,12 +314,13 @@ http://localhost:8080 with hot reload on both sides. The dev override turns the
 a server.
 
 ```bash
-docker compose run --rm --user root --entrypoint sh backend -c "pip install -q -r requirements-dev.txt && python -m pytest"
+docker compose run --rm --user root backend sh -c "pip install -q -r requirements-dev.txt && python -m pytest"
 ```
 
-`--entrypoint` is required: the image's entrypoint ends with
-`exec gunicorn "$@"`, so anything passed without it becomes a gunicorn argument
-rather than a command.
+The entrypoint runs its startup checks and then hands over to whatever command
+you pass, so this needs no `--entrypoint`. It did until recently: the script
+ended with `exec gunicorn "$@"`, which turned the command into gunicorn flags
+and killed the container after every check had logged success.
 
 ```bash
 ./scripts/e2e.sh
