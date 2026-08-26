@@ -40,7 +40,7 @@ from .models import (
     UserBookState,
 )
 from .outline import outline_for
-from .pagination import envelope, paginate
+from .pagination import PAGE_PARAMS, envelope, paginate, paginated
 from .permissions import can_modify, can_read, readable_books
 from .quota import QuotaExceeded, ensure_room, limit_for, usage_for
 from .ranges import serve_file
@@ -145,7 +145,8 @@ class OwnedMixin:
 
 @csrf_required
 class FolderListView(OwnedMixin, APIView):
-    @extend_schema(summary="Folders", responses={200: FolderSerializer(many=True)})
+    @extend_schema(summary="Folders", parameters=PAGE_PARAMS,
+                   responses={200: paginated(FolderSerializer, "PaginatedFolders")})
     def get(self, request):
         queryset = self.folders().live()
         if "parent" in request.GET:
@@ -255,7 +256,8 @@ class FolderRestoreView(OwnedMixin, APIView):
 # --------------------------------------------------------------------------- #
 
 class BookListView(OwnedMixin, APIView):
-    @extend_schema(summary="Books", responses={200: BookSerializer(many=True)})
+    @extend_schema(summary="Books", parameters=PAGE_PARAMS,
+                   responses={200: paginated(BookSerializer, "PaginatedBooks")})
     def get(self, request):
         queryset = self.books().live()
 
@@ -952,7 +954,8 @@ class PageNoteDetailView(AnnotationDetailView):
 class SharedBooksView(OwnedMixin, APIView):
     """Books other people have shared with the instance (PRD §12, §16)."""
 
-    @extend_schema(summary="Shared with me", responses={200: SharedBookSerializer(many=True)})
+    @extend_schema(summary="Shared with me", parameters=PAGE_PARAMS,
+                   responses={200: paginated(SharedBookSerializer, "PaginatedSharedBooks")})
     def get(self, request):
         from django.db.models import Prefetch
 
@@ -1010,7 +1013,8 @@ class CollectionListView(OwnedMixin, APIView):
     def collections(self):
         return Collection.objects.filter(owner=self.request.user)
 
-    @extend_schema(summary="Collections", responses={200: CollectionSerializer(many=True)})
+    @extend_schema(summary="Collections", parameters=PAGE_PARAMS,
+                   responses={200: paginated(CollectionSerializer, "PaginatedCollections")})
     def get(self, request):
         queryset = self.collections()
         if "parent" in request.GET:
@@ -1082,7 +1086,8 @@ class CollectionDetailView(OwnedMixin, APIView):
 
 @csrf_required
 class CollectionBooksView(OwnedMixin, APIView):
-    @extend_schema(summary="Books in a collection", responses={200: BookSerializer(many=True)})
+    @extend_schema(summary="Books in a collection", parameters=PAGE_PARAMS,
+                   responses={200: paginated(BookSerializer, "PaginatedCollectionBooks")})
     def get(self, request, collection_id: int):
         collection = CollectionDetailView.get_collection(self, request, collection_id)
         books = self.books().live().filter(memberships__collection=collection)

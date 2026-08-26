@@ -16,6 +16,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from drf_spectacular.utils import OpenApiParameter, inline_serializer
+from rest_framework import serializers
+
 DEFAULT_LIMIT = 100
 MAX_LIMIT = 500
 
@@ -50,3 +53,31 @@ def paginate(queryset, request, *, default: int = DEFAULT_LIMIT) -> tuple[Any, d
 
 def envelope(data, meta: dict) -> dict:
     return {**meta, "results": data}
+
+
+# --------------------------------------------------------------------------- #
+# Schema
+# --------------------------------------------------------------------------- #
+#
+# Declared rather than assumed, because the alternative was tried: the six
+# endpoints below kept `responses={200: XSerializer(many=True)}` for exactly as
+# long as it took someone to read the schema and believe it. PRD §45 lists a
+# published OpenAPI schema as a criterion, which makes a wrong one worse than
+# none. `test_schema.py` checks these against real responses.
+
+PAGE_PARAMS = [
+    OpenApiParameter("limit", int, description=(
+        f"How many to return. Default {DEFAULT_LIMIT}, capped at {MAX_LIMIT}.")),
+    OpenApiParameter("offset", int, description="How many to skip."),
+]
+
+
+def paginated(child, name: str):
+    """The envelope `child` comes back in, for `responses={200: ...}`."""
+    return inline_serializer(name=name, fields={
+        "count": serializers.IntegerField(
+            help_text="How many there are in total, not how many arrived."),
+        "limit": serializers.IntegerField(),
+        "offset": serializers.IntegerField(),
+        "results": child(many=True),
+    })

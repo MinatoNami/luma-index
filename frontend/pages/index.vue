@@ -190,23 +190,31 @@ async function completeMove(destination: number | null) {
 // here is a per-session override; Settings is where it is saved for good.
 watch(view, value => import.meta.client && localStorage.setItem('lumaindex-view', value))
 
+/**
+ * One description of "which books are we looking at", used by the initial fetch
+ * and by loading the next page. Two copies of this drifting apart would show up
+ * as a Load more that quietly returns a different listing.
+ */
+function bookQuery() {
+  const view = activeView.value
+  const collection = activeCollection.value
+  const params: Record<string, string> = {}
+  if (search.value) params.search = search.value
+  if (view !== 'files') params.view = view
+  if (collection !== null) params.collection = String(collection)
+  params.sort = apiSort.value
+  // Folders only make sense while browsing the tree; a view or a collection is
+  // a flat list of books.
+  return { params, browsing: view === 'files' && collection === null }
+}
+
 // Fetched during SSR, not in onMounted. Loading in onMounted meant the server
 // always rendered the skeleton — so every visit flashed placeholders before the
 // real content, and the Nuxt server was doing no useful work.
 const { data, pending, error: loadError, refresh: reload } = await useAsyncData(
   'library-folder',
   async () => {
-    const view = activeView.value
-    const collection = activeCollection.value
-    const params: Record<string, string> = {}
-    if (search.value) params.search = search.value
-    if (view !== 'files') params.view = view
-    if (collection !== null) params.collection = String(collection)
-
-    // Folders only make sense while browsing the tree; a view or a collection
-    // is a flat list of books.
-    const browsing = view === 'files' && collection === null
-    params.sort = apiSort.value
+    const { params, browsing } = bookQuery()
     const empty = { items: [], total: 0 }
     const [folderList, bookList] = await Promise.all([
       browsing ? library.listFolders(currentId.value, { sort: apiSort.value })
@@ -243,7 +251,34 @@ watch(loadError, (failure) => {
 }, { immediate: true })
 
 const folders = computed<Folder[]>(() => data.value?.folders ?? [])
-const books = computed<Book[]>(() => data.value?.books ?? [])
+
+// Pages fetched past the first. Cleared whenever the listing changes, or a
+// Load more from the previous folder would append into the new one.
+const extraBooks = ref<Book[]>([])
+const loadingMore = ref(false)
+watch([currentId, search, activeView, activeCollection, apiSort],
+      () => { extraBooks.value = [] })
+
+const books = computed<Book[]>(
+  () => [...(data.value?.books ?? []), ...extraBooks.value])
+
+async function loadMore() {
+  if (loadingMore.value) return
+  loadingMore.value = true
+  try {
+    const { params, browsing } = bookQuery()
+    const page = await library.listBooks(browsing ? currentId.value : null,
+                                         { ...params, offset: books.value.length })
+    // Guard against a double click racing itself into duplicate rows.
+    const known = new Set(books.value.map(b => b.id))
+    extraBooks.value.push(...page.items.filter(b => !known.has(b.id)))
+  } catch (failure) {
+    const f = failure as any
+    error.value = f?.data?.detail || f?.message || 'Could not load any more.'
+  } finally {
+    loadingMore.value = false
+  }
+}
 const currentFolder = computed<Folder | null>(() => data.value?.detail ?? null)
 const breadcrumbs = computed<Folder[]>(() => data.value?.detail?.ancestors ?? [])
 // Only a first load shows placeholders; a background refresh must not blank the
@@ -813,9 +848,13 @@ function itemLabel(folder: Folder): string {
         </div>
       </div>
 
-      <p v-if="truncated" class="truncation tertiary">
-        Showing {{ shown }} of {{ held }}. Narrow it with search, or open a folder.
-      </p>
+      <div v-if="truncated" class="truncation">
+        <p class="tertiary">Showing {{ shown }} of {{ held }}</p>
+        <AppButton v-if="books.length < (data?.bookTotal ?? 0)"
+                   :disabled="loadingMore" @click="loadMore">
+          {{ loadingMore ? 'Loading…' : 'Load more' }}
+        </AppButton>
+      </div>
 
     </main>
 
@@ -862,8 +901,11 @@ function itemLabel(folder: Folder): string {
 
 <style scoped>
 .truncation {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
   margin: var(--space-4) 0 0;
-  text-align: center;
   font-size: var(--text-sm);
 }
 
