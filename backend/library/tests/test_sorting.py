@@ -84,7 +84,7 @@ def test_books_sort_by_name_by_default(api, user):
     a_book(user, "Zebra")
     a_book(user, "Alpha")
 
-    body = api.get(reverse("library:books")).json()
+    body = api.get(reverse("library:books")).json()["results"]
 
     assert names(body) == ["Alpha", "Zebra"]
 
@@ -94,8 +94,8 @@ def test_books_sort_by_when_they_were_added(api, user):
     a_book(user, "Old", added=at(30))
     a_book(user, "New", added=at(1))
 
-    assert names(api.get(reverse("library:books"), {"sort": "added"}).json()) == ["Old", "New"]
-    assert names(api.get(reverse("library:books"), {"sort": "-added"}).json()) == ["New", "Old"]
+    assert names(api.get(reverse("library:books"), {"sort": "added"}).json()["results"]) == ["Old", "New"]
+    assert names(api.get(reverse("library:books"), {"sort": "-added"}).json()["results"]) == ["New", "Old"]
 
 
 @pytest.mark.django_db
@@ -103,7 +103,7 @@ def test_books_sort_by_size(api, user):
     a_book(user, "Small", size=10)
     a_book(user, "Large", size=9000)
 
-    assert names(api.get(reverse("library:books"), {"sort": "-size"}).json()) == ["Large", "Small"]
+    assert names(api.get(reverse("library:books"), {"sort": "-size"}).json()["results"]) == ["Large", "Small"]
 
 
 @pytest.mark.django_db
@@ -111,7 +111,7 @@ def test_folders_sort_by_name_by_default(api, user):
     a_folder(user, "Zebra")
     a_folder(user, "Alpha")
 
-    assert names(api.get(reverse("library:folders")).json()) == ["Alpha", "Zebra"]
+    assert names(api.get(reverse("library:folders")).json()["results"]) == ["Alpha", "Zebra"]
 
 
 @pytest.mark.django_db
@@ -119,7 +119,7 @@ def test_folders_sort_by_when_they_were_added(api, user):
     a_folder(user, "Old", added=at(30))
     a_folder(user, "New", added=at(1))
 
-    body = api.get(reverse("library:folders"), {"sort": "-added"}).json()
+    body = api.get(reverse("library:folders"), {"sort": "-added"}).json()["results"]
 
     assert names(body) == ["New", "Old"]
 
@@ -129,7 +129,7 @@ def test_a_folder_sort_a_folder_cannot_do_falls_back_to_name(api, user):
     a_folder(user, "Zebra")
     a_folder(user, "Alpha")
 
-    body = api.get(reverse("library:folders"), {"sort": "-size"}).json()
+    body = api.get(reverse("library:folders"), {"sort": "-size"}).json()["results"]
 
     assert names(body) == ["Alpha", "Zebra"], "not a 500"
 
@@ -190,4 +190,4 @@ def test_a_live_item_has_no_expiry(api, user, settings):
     settings.TRASH_RETENTION_DAYS = 30
     a_book(user, "Kept")
 
-    assert api.get(reverse("library:books")).json()[0]["expires_at"] is None
+    assert api.get(reverse("library:books")).json()["results"][0]["expires_at"] is None

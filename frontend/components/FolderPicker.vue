@@ -45,7 +45,7 @@ async function open(folder: Folder | null) {
   loading.value = true
   try {
     parent.value = folder?.id ?? null
-    folders.value = await library.listFolders(parent.value)
+    folders.value = (await library.listFolders(parent.value)).items
   } finally {
     loading.value = false
   }

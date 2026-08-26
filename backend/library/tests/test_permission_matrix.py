@@ -221,7 +221,7 @@ def test_folders_are_never_visible_across_users(owner, stranger, admin):
 
 @pytest.mark.django_db
 def test_a_users_library_listing_never_includes_another_users_books(owner, stranger, books):
-    listed = signed_in(stranger).get(reverse("library:books")).json()
+    listed = signed_in(stranger).get(reverse("library:books")).json()["results"]
     assert listed == [], "the library listing leaked another user's books"
 
 

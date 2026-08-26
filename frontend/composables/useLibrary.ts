@@ -61,21 +61,45 @@ export interface UploadResult {
   errors: string[]
 }
 
+/** A bounded slice of a list, plus how many there are in total. */
+export interface Page<T> {
+  items: T[]
+  total: number
+}
+
+interface Envelope<T> {
+  count: number
+  limit: number
+  offset: number
+  results: T[]
+}
+
+const page = <T>(body: Envelope<T>): Page<T> => ({
+  items: body.results ?? [],
+  total: body.count ?? 0,
+})
+
 export function useLibrary() {
   const { api, ensureCsrf } = useApi()
 
   const folderParam = (id: number | null) => (id === null ? 'root' : String(id))
 
-  async function listFolders(parent: number | null, options: { sort?: string } = {}) {
-    return await api<Folder[]>('/library/folders/', {
+  async function listFolders(
+    parent: number | null,
+    options: { sort?: string; limit?: number; offset?: number } = {},
+  ): Promise<Page<Folder>> {
+    return page(await api<Envelope<Folder>>('/library/folders/', {
       params: { parent: folderParam(parent), ...options },
-    })
+    }))
   }
 
-  async function listBooks(parent: number | null, options: { search?: string; sort?: string } = {}) {
-    return await api<Book[]>('/library/books/', {
+  async function listBooks(
+    parent: number | null,
+    options: { search?: string; sort?: string; limit?: number; offset?: number } = {},
+  ): Promise<Page<Book>> {
+    return page(await api<Envelope<Book>>('/library/books/', {
       params: { folder: folderParam(parent), ...options },
-    })
+    }))
   }
 
   async function folderDetail(id: number) {
@@ -246,7 +270,7 @@ export function useSharing() {
   const { api, ensureCsrf } = useApi()
 
   async function sharedWithMe() {
-    return await api<SharedBook[]>('/library/shared/')
+    return (await api<Envelope<SharedBook>>('/library/shared/')).results
   }
 
   async function status(bookId: number) {

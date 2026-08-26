@@ -61,7 +61,9 @@ nothing records a per-book open time separately from progress.
   list endpoint is the one most likely to leak another user's private books, and
   a `get_queryset` starting from `Book.objects.all()` is how it happens.
 - **Paginate from the first commit.** An unpaginated library endpoint is fine
-  with twelve books and falls over on a real import.
+  with twelve books and falls over on a real import. This one was written down
+  and then not done for the whole of the project's life; `library/pagination.py`
+  is it finally being done.
 - **Deleting a collection deletes memberships, not books.** `CollectionBook`
   cascades; the books do not. Worth an explicit test — it is easy to get
   backwards.

@@ -105,10 +105,10 @@ def test_folders_can_be_listed_by_parent(api, user):
     Folder.objects.create(owner=user, name="Fiction", parent=books)
     Folder.objects.create(owner=user, name="Loose")
 
-    root = api.get(reverse("library:folders"), {"parent": "root"}).json()
+    root = api.get(reverse("library:folders"), {"parent": "root"}).json()["results"]
     assert {f["name"] for f in root} == {"Books", "Loose"}
 
-    inside = api.get(reverse("library:folders"), {"parent": books.pk}).json()
+    inside = api.get(reverse("library:folders"), {"parent": books.pk}).json()["results"]
     assert {f["name"] for f in inside} == {"Fiction"}
 
 
@@ -382,11 +382,11 @@ def test_a_trashed_book_is_hidden_but_restorable(api):
     book = Book.objects.get()
     api.delete(reverse("library:book-detail", args=[book.pk]), headers=api.headers)
 
-    assert api.get(reverse("library:books")).json() == []
+    assert api.get(reverse("library:books")).json()["results"] == []
     assert len(api.get(reverse("library:trash")).json()["books"]) == 1
 
     assert post(api, "library:book-restore", args=[book.pk]).status_code == 200
-    assert len(api.get(reverse("library:books")).json()) == 1
+    assert len(api.get(reverse("library:books")).json()["results"]) == 1
 
 
 @pytest.mark.django_db
@@ -424,9 +424,9 @@ def test_trashing_a_folder_hides_its_books(api, user):
                           headers=api.headers)
 
     assert response.json()["trashed"] == {"folders": 1, "books": 2}
-    assert api.get(reverse("library:books")).json() == []
+    assert api.get(reverse("library:books")).json()["results"] == []
     assert post(api, "library:folder-restore", args=[folder.pk]).status_code == 200
-    assert len(api.get(reverse("library:books")).json()) == 2
+    assert len(api.get(reverse("library:books")).json()["results"]) == 2
 
 
 @pytest.mark.django_db
@@ -450,7 +450,7 @@ def test_a_folder_of_subfolders_does_not_report_zero_items(api, user):
         inner = Folder.objects.create(owner=user, name=name, parent=outer)
         Book.objects.create(owner=user, title=f"{name} book", folder=inner)
 
-    body = api.get(reverse("library:folders"), {"parent": "root"}).json()[0]
+    body = api.get(reverse("library:folders"), {"parent": "root"}).json()["results"][0]
 
     assert body["folder_count"] == 2
     assert body["book_count"] == 0
@@ -463,7 +463,7 @@ def test_item_count_includes_both_folders_and_books(api, user):
     Folder.objects.create(owner=user, name="Sub", parent=folder)
     Book.objects.create(owner=user, title="Loose", folder=folder)
 
-    body = api.get(reverse("library:folders"), {"parent": "root"}).json()[0]
+    body = api.get(reverse("library:folders"), {"parent": "root"}).json()["results"][0]
     assert (body["folder_count"], body["book_count"], body["item_count"]) == (1, 1, 2)
 
 
@@ -475,5 +475,5 @@ def test_trashed_children_are_not_counted(api, user):
     doomed.trash()
     book.trash()
 
-    body = api.get(reverse("library:folders"), {"parent": "root"}).json()[0]
+    body = api.get(reverse("library:folders"), {"parent": "root"}).json()["results"][0]
     assert body["item_count"] == 0

@@ -89,3 +89,80 @@ jobs:
           set -a; . ./.env.example; set +a
           docker compose -f compose.yaml config >/dev/null
           docker compose -f compose.yaml -f compose.dev.yaml config >/dev/null
+
+  e2e:
+    # The only job that exercises the whole stack. It exists because three
+    # separate bugs — an entrypoint that swallowed its command, a dev frontend
+    # with no healthcheck, and `caddy` missing from ALLOWED_HOSTS — each meant
+    # the app could not start, and every other job stayed green throughout.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      # e2e.sh mounts frontend/ into the Playwright image and runs the local
+      # @playwright/test, so the install has to happen out here.
+      - run: npm ci
+        working-directory: frontend
+
+      - name: Configure
+        run: |
+          cp .env.example .env
+          {
+            echo "DJANGO_SECRET_KEY=ci-secret-key-long-enough-for-the-deploy-check-0123456789"
+            echo "POSTGRES_PASSWORD=ci-password"
+            # Reached as http://caddy:8080 from inside the compose network.
+            echo "LUMA_PUBLIC_ORIGIN=http://caddy:8080"
+            echo "DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,backend,caddy"
+            echo "DJANGO_CSRF_TRUSTED_ORIGINS=http://caddy:8080"
+            # Plain HTTP in CI, and a Secure cookie is never sent over it —
+            # which looks like a login that succeeds and then does nothing.
+            echo "DJANGO_SESSION_COOKIE_SECURE=False"
+            echo "DJANGO_CSRF_COOKIE_SECURE=False"
+          } >> .env
+
+      - name: Start the stack
+        # --build, not just up: the image tag defaults to `latest`, and a
+        # cached `latest` from an earlier build is silently preferred to the
+        # source in front of you. That is how a deploy once ran the previous
+        # release, and locally it started a worker from before the command it
+        # runs was renamed.
+        run: docker compose up -d --build --wait
+
+      - name: Seed a demo library
+        # Public-domain books, never a real library: the suite opens whatever
+        # it finds in a real browser.
+        run: docker compose exec -T backend python manage.py shell < scripts/demo_library.py
+
+      - name: Wait for the worker to render covers
+        run: |
+          for _ in $(seq 1 30); do
+            done_count=$(docker compose exec -T backend python manage.py shell -c \
+              'from library.models import Book; b=Book.objects.all(); print(b.exclude(thumbnail_path="").count(), b.count())' \
+              2>/dev/null | tail -1)
+            echo "covers: $done_count"
+            [ "$done_count" = "12 12" ] && exit 0
+            sleep 5
+          done
+          echo "the worker never finished rendering covers" >&2
+          docker compose logs worker | tail -40
+          exit 1
+
+      - name: End to end
+        run: ./scripts/e2e.sh
+
+      - name: What the containers said
+        if: failure()
+        run: docker compose logs --tail 120
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+          retention-days: 7

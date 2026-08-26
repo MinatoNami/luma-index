@@ -13,10 +13,10 @@ export function useCollections() {
   const { api, ensureCsrf } = useApi()
 
   async function list(parent?: number | null) {
-    return await api<Collection[]>('/library/collections/', {
+    return (await api<{ results: Collection[] }>('/library/collections/', {
       params: parent === undefined ? undefined
         : { parent: parent === null ? 'root' : String(parent) },
-    })
+    })).results
   }
 
   async function detail(id: number) {

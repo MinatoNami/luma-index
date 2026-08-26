@@ -124,7 +124,7 @@ def test_one_reader_cannot_see_or_move_anothers_progress(api, book, other_user):
 @pytest.mark.django_db
 def test_progress_appears_on_the_book_listing(api, book):
     put_progress(api, book, page=4, page_fraction=0.0)
-    listed = api.get(reverse("library:books")).json()[0]
+    listed = api.get(reverse("library:books")).json()["results"][0]
     assert listed["progress"]["percentage"] == 40.0
 
 
@@ -143,7 +143,7 @@ def test_listing_progress_does_not_grow_queries_per_book(api, book, user,
     # Session, user, books, sources/folders, one prefetch — a small constant,
     # nowhere near one per book.
     with django_assert_max_num_queries(10):
-        listed = api.get(reverse("library:books")).json()
+        listed = api.get(reverse("library:books")).json()["results"]
 
     assert len(listed) == 16
     assert any(b["progress"] for b in listed)

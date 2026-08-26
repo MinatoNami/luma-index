@@ -204,6 +204,7 @@ Why the code looks the way it does, one line each.
 | **Quota is charged per account** | The distinct files an account's books point at, trash included. Distinct, so one PDF filed twice is not billed twice; per-account, so whether your upload is free does not depend on a stranger having uploaded it first. `library/quota.py` |
 | **A book is downloaded once** | `/content` uses the storage key as its ETag, which content addressing makes free and exact — it cannot claim "unchanged" about changed bytes. Re-opening costs a 304. The same validator lets `If-Range` resume a partial download. |
 | **The server's byte count is authoritative** | A chunk arriving twice is behind the mark and refused; one arriving early would leave a hole and is refused too. Both replies carry the real offset, so a client corrects itself in one round trip. `library/chunked.py` |
+| **Every list is bounded** | `?limit`/`?offset`, capped at 500, answering `{count, results}` rather than a bare array. The `count` is the point: a hundred books out of four hundred is otherwise indistinguishable from a library of a hundred, so the grid can say "showing 100 of 400". `library/pagination.py` |
 | **Sorting is one vocabulary** | `?sort=name` means the same thing in every listing, and asking folders for a column they lack falls back to alphabetical rather than to a direction nobody chose. `library/sorting.py` |
 | **Bulk actions are partial by design** | An item that cannot be acted on is skipped with a reason and the rest go through. Ids owned by someone else are filtered out, not rejected — naming them would confirm the row exists. `library/bulk.py` |
 | **Folders borrow their covers** | The API sends up to four book ids and the browser tiles covers it already has. No composite exists, so nothing needs invalidating when a folder changes. A folder of only subfolders takes one cover from each in turn. `library/previews.py` |
@@ -254,7 +255,7 @@ walkthrough, backups, and troubleshooting in
 
 | Gap | Detail |
 | --- | --- |
-| **The e2e suite is not in CI** | `./scripts/e2e.sh` runs real Chromium on the compose network and all six reader tests pass, but nothing runs it automatically. Point it at a scratch library — `COMPOSE_PROJECT=lumaindex-demo` — since it opens a real book in a real browser. |
+| **Nothing alerts** | `deploy.sh backup:status` covers backups going stale and nothing else. |
 | **A restore onto an empty server** | `backup`, `verify`, `restore:library` and `drill` have all run against the real server, and the library mirror round-trips byte-identical with a flipped byte caught. The parts are proven; the whole drill is not. |
 | **No real SMTP relay** | Exercised against a local sink, plus the failure paths (refused connection, rejected credentials). Untried: a provider wanting an app password or rejecting the From domain — which is what `check_email` is for. |
 | **Nothing works offline** | No service worker. A stale cache in front of a PDF library is a worse failure than a clear network error. |

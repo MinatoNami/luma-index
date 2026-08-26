@@ -207,21 +207,28 @@ const { data, pending, error: loadError, refresh: reload } = await useAsyncData(
     // is a flat list of books.
     const browsing = view === 'files' && collection === null
     params.sort = apiSort.value
+    const empty = { items: [], total: 0 }
     const [folderList, bookList] = await Promise.all([
       browsing ? library.listFolders(currentId.value, { sort: apiSort.value })
-               : Promise.resolve([]),
+               : Promise.resolve(empty),
       browsing
         ? library.listBooks(currentId.value, params)
-        : library.listBooks(null, params).then(books => books),
+        : library.listBooks(null, params),
     ])
     const detail = browsing && currentId.value !== null
       ? await library.folderDetail(currentId.value)
       : null
-    return { folders: folderList, books: bookList, detail }
+    return {
+      folders: folderList.items, books: bookList.items, detail,
+      // What the server holds, not what arrived: the listing is capped, and a
+      // truncated page is otherwise indistinguishable from a short one.
+      folderTotal: folderList.total, bookTotal: bookList.total,
+    }
   },
   {
     watch: [currentId, search, activeView, activeCollection, apiSort],
-    default: () => ({ folders: [], books: [], detail: null }),
+    default: () => ({ folders: [], books: [], detail: null,
+                      folderTotal: 0, bookTotal: 0 }),
   },
 )
 
@@ -525,6 +532,12 @@ function bookActions(book: Book) {
 }
 
 const isEmpty = computed(() => !folders.value.length && !books.value.length)
+
+// The API caps a listing. Saying so is the whole point of the cap: a hundred
+// books shown out of four hundred looks exactly like a library of a hundred.
+const shown = computed(() => folders.value.length + books.value.length)
+const held = computed(() => (data.value?.folderTotal ?? 0) + (data.value?.bookTotal ?? 0))
+const truncated = computed(() => held.value > shown.value)
 const bookHref = (book: Book) => `/books/${book.id}`
 
 function itemLabel(folder: Folder): string {
@@ -800,6 +813,10 @@ function itemLabel(folder: Folder): string {
         </div>
       </div>
 
+      <p v-if="truncated" class="truncation tertiary">
+        Showing {{ shown }} of {{ held }}. Narrow it with search, or open a folder.
+      </p>
+
     </main>
 
     <!-- pointer-events: none, or this overlay would intercept every drop that
@@ -844,6 +861,12 @@ function itemLabel(folder: Folder): string {
 </template>
 
 <style scoped>
+.truncation {
+  margin: var(--space-4) 0 0;
+  text-align: center;
+  font-size: var(--text-sm);
+}
+
 .shell { min-height: 100dvh; display: flex; flex-direction: column; }
 
 .topbar {

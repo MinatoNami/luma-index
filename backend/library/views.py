@@ -41,6 +41,7 @@ from .models import (
 )
 from .outline import outline_for
 from .permissions import can_modify, can_read, readable_books
+from .pagination import envelope, paginate
 from .quota import QuotaExceeded, ensure_room, limit_for, usage_for
 from .ranges import serve_file
 from .retention import retention_days
@@ -152,7 +153,9 @@ class FolderListView(OwnedMixin, APIView):
             queryset = (queryset.filter(parent__isnull=True) if raw in ("", "root", "null")
                         else queryset.filter(parent_id=raw))
         queryset = sorting.apply(queryset, request.GET.get("sort"), sorting.FOLDER_FIELDS)
-        return Response(FolderSerializer(queryset, many=True, context={"request": request}).data)
+        rows, meta = paginate(queryset, request)
+        return Response(envelope(
+            FolderSerializer(rows, many=True, context={"request": request}).data, meta))
 
     @extend_schema(summary="Create a folder", request=FolderSerializer,
                    responses={201: FolderSerializer})
@@ -264,9 +267,10 @@ class BookListView(OwnedMixin, APIView):
             queryset = queryset.filter(reader_states__user=request.user,
                                        reader_states__is_favourite=True)
         elif view == "recent":
-            queryset = queryset.order_by("-created_at")[:50]
-            return Response(BookSerializer(queryset, many=True,
-                                           context={"request": request}).data)
+            queryset = queryset.order_by("-created_at")
+            rows, meta = paginate(queryset, request, default=50)
+            return Response(envelope(
+                BookSerializer(rows, many=True, context={"request": request}).data, meta))
         elif view == "unsorted":
             # In no collection at all — the pile you have not filed yet.
             queryset = queryset.filter(memberships__isnull=True)
@@ -284,7 +288,9 @@ class BookListView(OwnedMixin, APIView):
 
         queryset = sorting.apply(queryset, request.GET.get("sort"), sorting.BOOK_FIELDS)
 
-        return Response(BookSerializer(queryset, many=True, context={"request": request}).data)
+        rows, meta = paginate(queryset, request)
+        return Response(envelope(
+            BookSerializer(rows, many=True, context={"request": request}).data, meta))
 
 
 @csrf_required
@@ -709,9 +715,15 @@ class TrashView(OwnedMixin, APIView):
         sort = request.GET.get("sort", "-trashed")
         folders = sorting.apply(self.folders().trashed(), sort, sorting.FOLDER_FIELDS)
         books = sorting.apply(self.books().trashed(), sort, sorting.BOOK_FIELDS)
+        folder_rows, folder_meta = paginate(folders, request)
+        book_rows, book_meta = paginate(books, request)
         return Response({
-            "folders": FolderSerializer(folders, many=True, context={"request": request}).data,
-            "books": BookSerializer(books, many=True, context={"request": request}).data,
+            "folder_count": folder_meta["count"],
+            "book_count": book_meta["count"],
+            "folders": FolderSerializer(folder_rows, many=True,
+                                        context={"request": request}).data,
+            "books": BookSerializer(book_rows, many=True,
+                                    context={"request": request}).data,
             # Null when retention is off, which is the default.
             "retention_days": retention_days() or None,
         })
@@ -956,8 +968,9 @@ class SharedBooksView(OwnedMixin, APIView):
             ))
             .order_by("title")
         )
-        return Response(SharedBookSerializer(books, many=True,
-                                             context={"request": request}).data)
+        rows, meta = paginate(books, request)
+        return Response(envelope(SharedBookSerializer(
+            rows, many=True, context={"request": request}).data, meta))
 
 
 @csrf_required
@@ -1004,8 +1017,9 @@ class CollectionListView(OwnedMixin, APIView):
             raw = request.GET["parent"]
             queryset = (queryset.filter(parent__isnull=True) if raw in ("", "root", "null")
                         else queryset.filter(parent_id=raw))
-        return Response(CollectionSerializer(queryset, many=True,
-                                             context={"request": request}).data)
+        rows, meta = paginate(queryset, request)
+        return Response(envelope(CollectionSerializer(
+            rows, many=True, context={"request": request}).data, meta))
 
     @extend_schema(summary="Create a collection", request=CollectionSerializer,
                    responses={201: CollectionSerializer})
@@ -1072,7 +1086,9 @@ class CollectionBooksView(OwnedMixin, APIView):
     def get(self, request, collection_id: int):
         collection = CollectionDetailView.get_collection(self, request, collection_id)
         books = self.books().live().filter(memberships__collection=collection)
-        return Response(BookSerializer(books, many=True, context={"request": request}).data)
+        rows, meta = paginate(books, request)
+        return Response(envelope(
+            BookSerializer(rows, many=True, context={"request": request}).data, meta))
 
     @extend_schema(summary="Add a book to a collection", request=dict,
                    responses={201: OpenApiResponse(description="Added")})

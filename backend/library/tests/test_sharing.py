@@ -130,7 +130,7 @@ def test_shared_with_me_lists_other_peoples_books_only(api, book, user, reader, 
     own = Book.objects.create(owner=other_user, title="Their own",
                               visibility=Book.Visibility.SHARED)
 
-    listed = reader.get(reverse("library:shared")).json()
+    listed = reader.get(reverse("library:shared")).json()["results"]
     titles = [b["title"] for b in listed]
     assert book.title in titles
     assert own.title not in titles, "your own book is not 'shared with me'"
@@ -144,7 +144,7 @@ def test_a_reader_never_sees_the_owners_filenames_or_folders(api, book, user, re
     book.save(update_fields=["folder"])
     share(book, user)
 
-    body = reader.get(reverse("library:shared")).json()[0]
+    body = reader.get(reverse("library:shared")).json()["results"][0]
     raw = str(body)
     assert "Private Folder Name" not in raw
     assert "Shared.pdf" not in raw

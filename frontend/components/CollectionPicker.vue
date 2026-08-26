@@ -24,9 +24,9 @@ async function load() {
   // Which ones already contain this book.
   const { api } = useApi()
   const containing = await Promise.all(all.value.map(async (c) => {
-    const books = await api<{ id: number }[]>('/library/books/', {
+    const books = (await api<{ results: { id: number }[] }>('/library/books/', {
       params: { collection: String(c.id) },
-    }).catch(() => [])
+    }).catch(() => ({ results: [] }))).results
     return books.some(b => b.id === props.bookId) ? c.id : null
   }))
   member.value = new Set(containing.filter((id): id is number => id !== null))

@@ -45,10 +45,6 @@ python3 -c "import secrets; print('DJANGO_SECRET_KEY=' + secrets.token_urlsafe(6
 ```
 
 ```bash
-docker run --rm python:3.12-slim sh -c "pip -q install cryptography && python -c 'from cryptography.fernet import Fernet; print(\"LUMA_FIELD_ENCRYPTION_KEY=\" + Fernet.generate_key().decode())'"
-```
-
-```bash
 ./deploy/deploy.sh env:push && ./deploy/deploy.sh && ./deploy/deploy.sh createsuperuser
 ```
 
@@ -222,9 +218,9 @@ on its own restores a catalogue of books nobody can open. That is what
 `--db-only` warns about. Thumbnails need no backup (`manage rebuild_thumbnails`
 re-renders them) and staging holds only in-flight uploads.
 
-Neither half contains `.env`. Without `LUMA_FIELD_ENCRYPTION_KEY` the dump
-restores but its encrypted fields do not, so keep that in a password manager —
-not on the same disk.
+Neither half contains `.env`, and a restore needs it: `DJANGO_SECRET_KEY` and
+the Postgres password live nowhere else. Keep it in a password manager, not on
+the same disk as the backup.
 
 ### Checking a backup is real
 

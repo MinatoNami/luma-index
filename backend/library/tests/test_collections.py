@@ -34,7 +34,7 @@ def post(client, name, payload=None, args=None):
 @pytest.mark.django_db
 def test_create_and_list_a_collection(api):
     assert post(api, "library:collections", {"name": "Currently Reading"}).status_code == 201
-    listed = api.get(reverse("library:collections")).json()
+    listed = api.get(reverse("library:collections")).json()["results"]
     assert [c["name"] for c in listed] == ["Currently Reading"]
 
 
@@ -124,7 +124,7 @@ def test_collections_are_private(api, other_user, user):
     theirs = Collection.objects.create(owner=other_user, name="Theirs")
 
     assert api.get(reverse("library:collection-detail", args=[theirs.pk])).status_code == 404
-    assert api.get(reverse("library:collections")).json() == []
+    assert api.get(reverse("library:collections")).json()["results"] == []
     response = api.patch(reverse("library:collection-detail", args=[theirs.pk]),
                          {"name": "Mine"}, content_type="application/json",
                          headers=api.headers)
@@ -169,7 +169,7 @@ def test_favourites_are_per_reader(api, book, user, other_user):
 
     reader = Client()
     reader.force_login(other_user)
-    listed = reader.get(reverse("library:shared")).json()
+    listed = reader.get(reverse("library:shared")).json()["results"]
     assert listed, "the shared book should be visible to the other reader"
     assert UserBookState.objects.filter(user=other_user).count() == 0
 
@@ -185,7 +185,7 @@ def test_the_favourites_view_lists_only_favourites(api, user):
         if index == 1:
             post(api, "library:book-favourite", args=[created.pk])
 
-    listed = api.get(reverse("library:books"), {"view": "favourites"}).json()
+    listed = api.get(reverse("library:books"), {"view": "favourites"}).json()["results"]
     assert [b["title"] for b in listed] == ["Book 1"]
     assert listed[0]["is_favourite"] is True
 
@@ -200,7 +200,7 @@ def test_the_unsorted_view_lists_books_in_no_collection(api, user, book):
     collection = Collection.objects.create(owner=user, name="Somewhere")
     post(api, "library:collection-books", {"book_id": filed.pk}, args=[collection.pk])
 
-    listed = api.get(reverse("library:books"), {"view": "unsorted"}).json()
+    listed = api.get(reverse("library:books"), {"view": "unsorted"}).json()["results"]
     titles = [b["title"] for b in listed]
     assert book.title in titles
     assert "Filed" not in titles
@@ -211,7 +211,7 @@ def test_filtering_by_collection(api, user, book):
     collection = Collection.objects.create(owner=user, name="Reading")
     post(api, "library:collection-books", {"book_id": book.pk}, args=[collection.pk])
 
-    listed = api.get(reverse("library:books"), {"collection": collection.pk}).json()
+    listed = api.get(reverse("library:books"), {"collection": collection.pk}).json()["results"]
     assert [b["id"] for b in listed] == [book.pk]
 
 
@@ -220,7 +220,7 @@ def test_another_users_collection_cannot_be_filtered_by(api, other_user, book):
     theirs = Collection.objects.create(owner=other_user, name="Theirs")
     CollectionBook.objects.create(collection=theirs, book=book)
 
-    assert api.get(reverse("library:books"), {"collection": theirs.pk}).json() == []
+    assert api.get(reverse("library:books"), {"collection": theirs.pk}).json()["results"] == []
 
 
 @pytest.mark.django_db
@@ -234,6 +234,6 @@ def test_listing_favourites_does_not_query_per_book(api, user, django_assert_max
         UserBookState.objects.create(user=user, book=created, is_favourite=True)
 
     with django_assert_max_num_queries(10):
-        listed = api.get(reverse("library:books")).json()
+        listed = api.get(reverse("library:books")).json()["results"]
     assert len(listed) == 15
     assert all(b["is_favourite"] for b in listed)

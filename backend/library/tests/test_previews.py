@@ -159,7 +159,7 @@ def test_a_folder_listing_carries_its_previews(api, user):
     folder = Folder.objects.create(owner=user, name="Django")
     expected = [book(user, folder, "Alpha").pk, book(user, folder, "Beta").pk]
 
-    body = api.get(reverse("library:folders"), {"parent": "root"}).json()
+    body = api.get(reverse("library:folders"), {"parent": "root"}).json()["results"]
 
     assert body[0]["preview_book_ids"] == expected
 
