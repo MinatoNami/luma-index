@@ -22,6 +22,10 @@ from rest_framework import serializers
 DEFAULT_LIMIT = 100
 MAX_LIMIT = 500
 
+# Annotations are small rows and a client wants all of them, so it pages
+# through the lot; a bigger slice is fewer round trips for the same bytes.
+ANNOTATION_LIMIT = 250
+
 
 def _int(raw: str | None, fallback: int) -> int:
     try:

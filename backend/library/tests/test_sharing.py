@@ -184,8 +184,8 @@ def test_readers_cannot_see_each_others_annotations(api, book, user, reader):
                 {"page": 0, "position_data": quads, "selected_text": "reader's"},
                 content_type="application/json", headers=reader.headers)
 
-    owner_sees = api.get(reverse("library:highlights", args=[book.pk])).json()
-    reader_sees = reader.get(reverse("library:highlights", args=[book.pk])).json()
+    owner_sees = api.get(reverse("library:highlights", args=[book.pk])).json()["results"]
+    reader_sees = reader.get(reverse("library:highlights", args=[book.pk])).json()["results"]
 
     assert [h["selected_text"] for h in owner_sees] == ["owner's"]
     assert [h["selected_text"] for h in reader_sees] == ["reader's"]
@@ -211,7 +211,7 @@ def test_unsharing_keeps_other_readers_annotations(api, book, user, reader, othe
         "un-sharing destroyed another reader's bookmark"
 
     share(book, user)
-    assert len(reader.get(reverse("library:bookmarks", args=[book.pk])).json()) == 1
+    assert len(reader.get(reverse("library:bookmarks", args=[book.pk])).json()["results"]) == 1
 
 
 @pytest.mark.django_db

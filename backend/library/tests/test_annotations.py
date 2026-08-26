@@ -88,7 +88,7 @@ def test_a_bookmark_round_trips(api, book):
     response = post(api, "library:bookmarks", book, {"page": 4, "label": "The good bit"})
     assert response.status_code == 201
 
-    listed = api.get(reverse("library:bookmarks", args=[book.pk])).json()
+    listed = api.get(reverse("library:bookmarks", args=[book.pk])).json()["results"]
     assert [b["label"] for b in listed] == ["The good bit"]
 
 
@@ -163,7 +163,7 @@ def test_highlights_can_be_fetched_for_one_page(api, book):
         post(api, "library:highlights", book,
              {"page": page, "position_data": quads((1, 1, 2, 2))})
 
-    listed = api.get(reverse("library:highlights", args=[book.pk]), {"page": 1}).json()
+    listed = api.get(reverse("library:highlights", args=[book.pk]), {"page": 1}).json()["results"]
     assert len(listed) == 2
 
 

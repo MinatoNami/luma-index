@@ -79,6 +79,19 @@ Session.objects.filter(session_key='$SESSION').delete()" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
+# Warm the frontend before timing anything. Against the dev override Nuxt
+# compiles a route on first request, which is slower than the first test's
+# timeout and fails it — once, on a cold stack, in a way that looks like a
+# rendering bug. The production image serves a build and skips this in a
+# fraction of a second.
+# The reader route specifically: Nuxt compiles per route, so warming only "/"
+# leaves /books/<id> to compile inside the first test that opens it. With the
+# session cookie, or this warms the login page instead.
+step "Warming the frontend"
+docker run --rm --network "$NETWORK" curlimages/curl:latest \
+    -s -o /dev/null -m 180 -b "lumaindex_session=$SESSION" \
+    "http://caddy:8080/books/$BOOK_ID" || true
+
 # Pinned to the installed @playwright/test, because the browsers in the image
 # have to match the client driving them.
 VERSION="$(docker run --rm -v "$PWD/frontend":/w -w /w node:22-slim \

@@ -35,9 +35,33 @@ export interface PageNote {
   updated_at: string
 }
 
+interface Envelope<T> { count: number; limit: number; offset: number; results: T[] }
+
 export function useAnnotations(bookId: MaybeRefOrGetter<number>) {
   const { api, ensureCsrf } = useApi()
   const base = () => `/library/books/${toValue(bookId)}`
+
+  /**
+   * Every annotation, however many pages that takes.
+   *
+   * The list endpoints are bounded, and the reader draws overlays by filtering
+   * the highlights it holds by page number — so stopping at the first slice
+   * would not show a short list, it would stop showing highlights on later
+   * pages altogether. What the bound is for is the size of one response, not
+   * the size of what the client ends up with.
+   */
+  async function fetchAll<T>(path: string): Promise<T[]> {
+    const first = await api<Envelope<T>>(path)
+    const all = [...first.results]
+    // Guard on the slice being non-empty as well as on the count: a server
+    // that returned an empty page forever would otherwise spin here.
+    while (all.length < first.count) {
+      const next = await api<Envelope<T>>(path, { params: { offset: all.length } })
+      if (!next.results.length) break
+      all.push(...next.results)
+    }
+    return all
+  }
 
   const bookmarks = ref<Bookmark[]>([])
   const highlights = ref<Highlight[]>([])
@@ -45,9 +69,9 @@ export function useAnnotations(bookId: MaybeRefOrGetter<number>) {
 
   async function loadAll() {
     const [b, h, n] = await Promise.all([
-      api<Bookmark[]>(`${base()}/bookmarks`),
-      api<Highlight[]>(`${base()}/highlights`),
-      api<PageNote[]>(`${base()}/notes`),
+      fetchAll<Bookmark>(`${base()}/bookmarks`),
+      fetchAll<Highlight>(`${base()}/highlights`),
+      fetchAll<PageNote>(`${base()}/notes`),
     ])
     bookmarks.value = b
     highlights.value = h

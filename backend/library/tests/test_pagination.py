@@ -120,3 +120,55 @@ def test_continue_reading_still_answers(owner):
     response = signed_in(owner).get(reverse("library:continue-reading"))
     assert response.status_code == 200
     assert isinstance(response.json(), list)
+
+
+@pytest.mark.django_db
+def test_annotations_are_bounded_but_reachable(owner):
+    """Bounded, and every one still reachable.
+
+    The reader draws overlays by filtering the highlights it holds by page, so
+    a client that stopped at the first slice would stop showing highlights on
+    later pages rather than showing a short list. Walking the offsets has to
+    return every row exactly once.
+    """
+    from library.models import Highlight
+
+    book = make_books(owner, 1)[0]
+    for i in range(280):
+        Highlight.objects.create(
+            user=owner, book=book, page=i, selected_text=f"passage {i}",
+            position_data={"v": 1, "page": i,
+                           "quads": [{"x1": 1, "y1": 1, "x2": 2, "y2": 2}]})
+
+    client = signed_in(owner)
+    url = reverse("library:highlights", args=[book.pk])
+
+    first = client.get(url).json()
+    assert first["count"] == 280
+    assert len(first["results"]) == 250, "the default slice should bound one response"
+
+    seen: list[int] = [h["id"] for h in first["results"]]
+    while len(seen) < first["count"]:
+        page = client.get(url, {"offset": len(seen)}).json()
+        assert page["results"], "paging stalled before the end"
+        seen.extend(h["id"] for h in page["results"])
+
+    assert len(seen) == 280
+    assert len(set(seen)) == 280, "a page boundary repeated or dropped a highlight"
+
+
+@pytest.mark.django_db
+def test_filtering_annotations_by_page_still_works(owner):
+    from library.models import Highlight
+
+    book = make_books(owner, 1)[0]
+    for i in range(4):
+        Highlight.objects.create(
+            user=owner, book=book, page=i % 2, selected_text=f"p{i}",
+            position_data={"v": 1, "page": i % 2,
+                           "quads": [{"x1": 1, "y1": 1, "x2": 2, "y2": 2}]})
+
+    body = signed_in(owner).get(
+        reverse("library:highlights", args=[book.pk]), {"page": 1}).json()
+    assert body["count"] == 2
+    assert all(h["page"] == 1 for h in body["results"])

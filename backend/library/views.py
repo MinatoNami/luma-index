@@ -40,7 +40,7 @@ from .models import (
     UserBookState,
 )
 from .outline import outline_for
-from .pagination import PAGE_PARAMS, envelope, paginate, paginated
+from .pagination import ANNOTATION_LIMIT, PAGE_PARAMS, envelope, paginate, paginated
 from .permissions import can_modify, can_read, readable_books
 from .quota import QuotaExceeded, ensure_room, limit_for, usage_for
 from .ranges import serve_file
@@ -864,15 +864,21 @@ class AnnotationListView(OwnedMixin, APIView):
     def queryset_for(self, book):
         return self.model.objects.filter(user=self.request.user, book=book)
 
-    @extend_schema(summary="List annotations")
+    @extend_schema(summary="List annotations", parameters=PAGE_PARAMS)
     def get(self, request, book_id: int):
         book = self.get_readable_book(book_id)
         queryset = self.queryset_for(book)
         if "page" in request.GET:
-            # The reader asks per visible page; a heavily annotated 900-page
-            # book is a lot of JSON to hand a phone all at once.
             queryset = queryset.filter(page=request.GET["page"])
-        return Response(self.serializer_class(queryset, many=True).data)
+
+        # Bounded, but not lossy: the reader filters the highlights it holds by
+        # page to draw overlays, so a client that stopped at the first hundred
+        # would simply stop showing highlights past page ~100 — a wrong page,
+        # not a short list. The client pages through to the end; what this
+        # caps is any single response, which is what §23's "a lot of JSON to
+        # hand a phone all at once" is actually about.
+        rows, meta = paginate(queryset, request, default=ANNOTATION_LIMIT)
+        return Response(envelope(self.serializer_class(rows, many=True).data, meta))
 
     @extend_schema(summary="Create an annotation")
     def post(self, request, book_id: int):
