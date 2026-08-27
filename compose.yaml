@@ -48,6 +48,9 @@ services:
       DJANGO_CSRF_COOKIE_SECURE: ${DJANGO_CSRF_COOKIE_SECURE:-True}
       DJANGO_SESSION_COOKIE_AGE: ${DJANGO_SESSION_COOKIE_AGE:-1209600}
       LUMA_PUBLIC_ORIGIN: ${LUMA_PUBLIC_ORIGIN:-}
+      # Path prefix the instance is served under, no trailing slash.
+      # Empty unless a gateway routes to it by path.
+      LUMA_BASE_PATH: ${LUMA_BASE_PATH:-}
       LUMA_REGISTRATION_ENABLED: ${LUMA_REGISTRATION_ENABLED:-False}
       LUMA_NUM_PROXIES: ${LUMA_NUM_PROXIES:-2}
       LUMA_LOG_CLIENT_IP: ${LUMA_LOG_CLIENT_IP:-False}
@@ -140,7 +143,17 @@ services:
         condition: service_healthy
     environment:
       NUXT_API_INTERNAL_BASE: http://backend:8000
-      NUXT_PUBLIC_API_BASE: /api
+      NUXT_PUBLIC_API_BASE: ${LUMA_BASE_PATH:-}/api
+      # Read at runtime, so moving the instance under a path prefix does not
+      # need the image rebuilt. Nuxt takes the router base, the asset URLs and
+      # the prefix Nitro answers on from this. Trailing slash is required.
+      NUXT_APP_BASE_URL: ${LUMA_BASE_PATH:-}/
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:3000${LUMA_BASE_PATH:-}/login || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
     expose:
       - "3000"
     logging:

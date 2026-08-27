@@ -63,6 +63,14 @@ CSRF_TRUSTED_ORIGINS = env_list("DJANGO_CSRF_TRUSTED_ORIGINS")
 
 PUBLIC_ORIGIN = env("LUMA_PUBLIC_ORIGIN", "http://localhost:8080")
 
+# Path prefix the whole instance is served under, no trailing slash. Empty when
+# LumaIndex owns its own origin; "/luma-index" behind a gateway that routes by
+# path. FORCE_SCRIPT_NAME is what makes reverse(), the admin's redirects and
+# DRF's pagination links carry the prefix — without it Django builds URLs for
+# an origin root it does not actually live at, and every one of them 404s.
+BASE_PATH = env("LUMA_BASE_PATH", "").rstrip("/")
+FORCE_SCRIPT_NAME = BASE_PATH or None
+
 ROOT_URLCONF = "config.urls"
 WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
@@ -356,7 +364,10 @@ BOOK_CACHE_SECONDS = env_int("LUMA_BOOK_CACHE_SECONDS", 3600)
 
 # Admin static files only. Never point this at LIBRARY_DIR — stored PDFs must
 # be served through the authorization boundary, never as static content.
-STATIC_URL = "/static/"
+# Prefixed by hand: Django's own SCRIPT_NAME handling skips any STATIC_URL that
+# already starts with "/", so FORCE_SCRIPT_NAME alone leaves admin CSS pointing
+# at the origin root.
+STATIC_URL = f"{BASE_PATH}/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
