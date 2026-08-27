@@ -95,15 +95,16 @@ Four diagrams, because these four things fail and change independently.
 ### Getting in
 
 ```text
-        your devices, on the tailnet
-                    │
-                    │  https://<name>.ts.net:8443
-                    ▼
-           ┌─────────────────┐
-           │ tailscale serve │   terminates TLS with a real certificate
-           └────────┬────────┘   for the MagicDNS name
-                    │  plain http, 127.0.0.1 only
-                    ▼
+             your devices
+                  │
+                  │  https://<your-origin>
+                  ▼
+      ┌───────────────────────┐   tailscale serve, nginx, anything:
+      │  whatever terminates  │   not this project's business, and
+      │           TLS         │   there is exactly one seam
+      └───────────┬───────────┘
+                  │  http://127.0.0.1:8080   ← the only published port
+                  ▼
            ┌─────────────────┐
            │      Caddy      │   one origin, so no CORS and the session
            └──┬───────────┬──┘   cookie stays SameSite=Lax
@@ -115,10 +116,24 @@ Four diagrams, because these four things fail and change independently.
         └──────────┘  └────────┘
 ```
 
-Nothing is published beyond `127.0.0.1`: Caddy binds to loopback and
-`tailscale serve` is the only way in, so the app is never exposed to the LAN or
-the internet — while still getting a real certificate, which is what makes
-`Secure` cookies work.
+**One port reaches the host.** Caddy binds `127.0.0.1:8080` and nothing else is
+published at all, so the app is never exposed to the LAN or the internet by
+accident — whatever fronts it needs a single upstream.
+
+| Port | What | Reachable from |
+| --- | --- | --- |
+| **8080** | Caddy | the host, on loopback only — move it with `LUMA_BIND_ADDRESS` and `CADDY_HTTP_PORT` |
+| 8000 | Django (gunicorn) | the compose network |
+| 3000 | Nuxt | the compose network |
+| 5432 | PostgreSQL | the compose network |
+
+Three settings have to agree with the origin your proxy serves, and each fails
+quietly in its own way: `LUMA_PUBLIC_ORIGIN`, `DJANGO_CSRF_TRUSTED_ORIGINS`
+(a mismatch fails logins with a message that never mentions the origin), and
+`LUMA_NUM_PROXIES` (proxy plus Caddy is two hops). The proxy must forward
+`X-Forwarded-Proto`, or Django decides the request was plain HTTP and declines
+to set a `Secure` cookie — which looks like a login that works and then does
+nothing.
 
 ### Where the data sits
 
