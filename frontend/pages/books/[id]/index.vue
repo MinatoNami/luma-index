@@ -11,6 +11,7 @@ import type { Highlight, HighlightColour, Quad } from '~/composables/useAnnotati
 definePageMeta({ layout: false })
 
 const route = useRoute()
+const apiUrl = useApiUrl()
 const { api, ensureCsrf } = useApi()
 const { settings } = useSettings()
 
@@ -249,7 +250,7 @@ function onReaderScroll({ direction, atTop }: { direction: 'up' | 'down'; atTop:
 
 watch(searchOpen, (open) => { if (open) barHidden.value = false })
 
-const contentUrl = computed(() => `/api/library/books/${bookId.value}/content`)
+const contentUrl = computed(() => apiUrl(`/library/books/${bookId.value}/content`))
 const percentage = computed(() =>
   totalPages.value ? Math.round((page.value / totalPages.value) * 100) : 0)
 
@@ -297,7 +298,7 @@ function onPageHide() {
   if (!pending) return
   const position = pending
   navigator.sendBeacon?.(
-    `/api/library/books/${bookId.value}/progress`,
+    apiUrl(`/library/books/${bookId.value}/progress`),
     new Blob([JSON.stringify(position)], { type: 'application/json' }),
   )
 }

@@ -18,6 +18,7 @@ const props = withDefaults(defineProps<{ folder: Folder; size?: 'sm' | 'md' | 'l
 })
 
 const failed = ref<number[]>([])
+const apiUrl = useApiUrl()
 
 // Four cells always, however many covers there are: the empty ones show the
 // folder's own tint, which is what keeps a folder card from reading as a book.
@@ -45,7 +46,7 @@ watch(() => props.folder.preview_book_ids, () => { failed.value = [] })
     <AppIcon v-if="empty" name="folder" :size="props.size === 'lg' ? 34 : props.size === 'sm' ? 18 : 26" />
     <div v-else class="mosaic" aria-hidden="true">
       <span v-for="(id, index) in cells" :key="index" class="tile">
-        <img v-if="id !== null" :src="`/api/library/books/${id}/thumbnail`" alt=""
+        <img v-if="id !== null" :src="apiUrl(`/library/books/${id}/thumbnail`)" alt=""
              loading="lazy" decoding="async" @error="markFailed(id)" />
       </span>
     </div>

@@ -22,6 +22,25 @@ function readCookie(name: string): string | null {
   return match ? decodeURIComponent(match[2]) : null
 }
 
+/**
+ * A browser-reachable URL for an API path.
+ *
+ * For the URLs the *browser* follows rather than the app fetches: `<img src>`,
+ * `window.open`, the one PDF.js is given. Those never pass through `api()`, so
+ * they never picked up its base — which is invisible while the app owns the
+ * origin and breaks every cover the moment it is served under a path prefix.
+ *
+ * Always the public base, even during SSR. The server renders the attribute
+ * but the browser is what follows it, so `apiInternalBase` — which names a
+ * container on the compose network — would be both wrong and unreachable.
+ *
+ * Paths are given without the `/api` prefix: `/library/books/1/thumbnail`.
+ */
+export function useApiUrl() {
+  const config = useRuntimeConfig()
+  return (path: string) => `${config.public.apiBase}${path}`
+}
+
 export function useApi() {
   const config = useRuntimeConfig()
   // Captured here, during setup, rather than inside the request function.

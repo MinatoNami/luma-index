@@ -2,6 +2,7 @@
 import { type SharedBook } from '~/composables/useLibrary'
 
 const sharing = useSharing()
+const apiUrl = useApiUrl()
 
 const { data: books } = await useAsyncData('shared-books',
   () => sharing.sharedWithMe().catch(() => [] as SharedBook[]))
@@ -20,7 +21,7 @@ const { data: books } = await useAsyncData('shared-books',
         <div v-for="book in books" :key="book.id" class="card panel">
           <NuxtLink class="card-open" :to="`/books/${book.id}`">
             <div class="cover">
-              <img v-if="book.thumbnail_path" :src="`/api/library/books/${book.id}/thumbnail`"
+              <img v-if="book.thumbnail_path" :src="apiUrl(`/library/books/${book.id}/thumbnail`)"
                    :alt="`Cover of ${book.title}`" loading="lazy" />
               <AppIcon v-else name="file" :size="22" />
             </div>

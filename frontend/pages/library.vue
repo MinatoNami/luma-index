@@ -6,6 +6,7 @@ import type { RowAction } from '~/components/RowMenu.vue'
 import type { SearchHit } from '~/composables/useLibrary'
 
 const library = useLibrary()
+const apiUrl = useApiUrl()
 const route = useRoute()
 const router = useRouter()
 
@@ -547,7 +548,7 @@ function bookActions(book: Book) {
     { label: 'Details', icon: 'collection',
       run: () => navigateTo(`/books/${book.id}/details`) },
     { label: 'Download', icon: 'download',
-      run: () => window.open(`/api/library/books/${book.id}/content`, '_blank') },
+      run: () => window.open(apiUrl(`/library/books/${book.id}/content`), '_blank') },
     { label: 'Add to collection…', icon: 'collection',
       run: () => { inCollection.value = { id: book.id, title: book.title } } },
     { label: 'Move to…', icon: 'folder', run: () => startMove(book, 'book') },

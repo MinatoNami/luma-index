@@ -26,7 +26,8 @@ const percent = computed(() => {
 // Nothing to say about a book nobody has opened, and no room to say it on a
 // thumbnail. A finished book keeps a full bar: that is information too.
 const showProgress = computed(() => props.size !== 'sm' && percent.value > 0)
-const src = computed(() => `/api/library/books/${props.book.id}/thumbnail`)
+const apiUrl = useApiUrl()
+const src = computed(() => apiUrl(`/library/books/${props.book.id}/thumbnail`))
 
 /**
  * Catch an image that finished loading before Vue got here.
