@@ -71,12 +71,16 @@ export function useApi() {
       if (token) headers['X-CSRFToken'] = token
     }
 
-    return await $fetch<T>(path, {
+    // Cast: adding a server/ route made Nitro generate types for internal
+    // paths, so $fetch narrows to TypedInternalResponse and no longer agrees
+    // that a generic T is what comes back. Every path here is Django's, which
+    // Nitro knows nothing about.
+    return await $fetch(path, {
       baseURL: base,
       credentials: 'include',
       ...options,
       headers,
-    })
+    }) as T
   }
 
   /** Ask Django to set the CSRF cookie. Call before the first unsafe request. */

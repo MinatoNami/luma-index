@@ -44,14 +44,11 @@ export default defineNuxtConfig({
         { name: 'apple-mobile-web-app-status-bar-style', content: 'black-translucent' },
         { name: 'apple-mobile-web-app-title', content: 'LumaIndex' },
       ],
-      link: [
-        // SVG first for anything modern; the PNGs cover Safari's touch icon and
-        // the contexts that still ask for a raster favicon.
-        { rel: 'icon', type: 'image/svg+xml', href: '/icon.svg' },
-        { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/favicon-32.png' },
-        { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' },
-        { rel: 'manifest', href: '/manifest.webmanifest' },
-      ],
+      // The icon and manifest links are NOT here: their hrefs have to carry
+      // the base the app is served under, and that arrives at runtime. Nuxt
+      // rewrites build assets from app.baseURL but not head links, so these
+      // are set in app.vue where the runtime config can be read.
+
     },
   },
 

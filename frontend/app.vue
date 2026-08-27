@@ -12,7 +12,25 @@
  */
 const { settings } = useSettings()
 
+/**
+ * Icons and the manifest, pointed at wherever this instance is served from.
+ *
+ * Nuxt rewrites build assets from app.baseURL but not head links, so these
+ * would stay root-absolute — and behind a path prefix that means the manifest
+ * 404s, no install prompt appears, and the favicon comes from whatever else
+ * owns the root of the origin.
+ */
+const base = (useRuntimeConfig().app.baseURL || '/').replace(/\/$/, '')
+
 useHead({
+  link: [
+    // SVG first for anything modern; the PNGs cover Safari's touch icon and
+    // the contexts that still ask for a raster favicon.
+    { rel: 'icon', type: 'image/svg+xml', href: `${base}/icon.svg` },
+    { rel: 'icon', type: 'image/png', sizes: '32x32', href: `${base}/favicon-32.png` },
+    { rel: 'apple-touch-icon', href: `${base}/apple-touch-icon.png` },
+    { rel: 'manifest', href: `${base}/manifest.webmanifest` },
+  ],
   htmlAttrs: {
     // A getter rather than a computed wrapping the whole object: unhead
     // resolves per-value functions, and typing a ComputedRef as the attrs bag
