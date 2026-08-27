@@ -7,8 +7,9 @@ desktop, a tablet, or a phone. Books are private until you share one, and every
 reader keeps their own place, bookmarks, highlights, and notes.
 
 Five containers on one Ubuntu machine — PostgreSQL, Django, Nuxt, Caddy, and a
-background worker — reachable over [Tailscale](https://tailscale.com) and
-nothing else.
+background worker. One port reaches the host, on loopback, so whatever you put
+in front of it — [Tailscale](https://tailscale.com), nginx, anything — needs a
+single upstream and the app is never exposed by accident.
 
 > [`lumaindex-prd.md`](lumaindex-prd.md) is the original spec and still governs
 > the reader, sharing, and annotations. Its storage chapters do not: they
