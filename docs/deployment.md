@@ -67,6 +67,34 @@ Any spare serve port works and its certificate is just as real — but set
 `LUMA_PUBLIC_ORIGIN` and `DJANGO_CSRF_TRUSTED_ORIGINS` to include the port, or
 logins fail CSRF with a message that never mentions ports.
 
+### Behind your own gateway
+
+`tailscale serve` is one way to get TLS in front of this; nginx or anything else
+is another, and nothing in the stack assumes it. Exactly one port reaches the
+host — `127.0.0.1:8080`, Caddy — and everything else (Postgres, Django, Nuxt)
+is reachable only on the compose network. So a gateway needs one upstream:
+
+```text
+your gateway  ->  http://127.0.0.1:8080  ->  caddy  ->  django / nuxt
+```
+
+`LUMA_BIND_ADDRESS` and `CADDY_HTTP_PORT` move that address if 8080 is taken.
+Run `bootstrap` with `LUMA_SKIP_TAILSCALE_SERVE=1` to leave the serve step out.
+
+Three settings have to agree with what the gateway serves, and all three fail
+quietly in different ways if they do not:
+
+| Setting | Set it to |
+| --- | --- |
+| `LUMA_PUBLIC_ORIGIN` | The origin people type, scheme and port included |
+| `DJANGO_CSRF_TRUSTED_ORIGINS` | The same origin, exactly — a mismatch fails logins with a message that never mentions the origin |
+| `LUMA_NUM_PROXIES` | How many proxies sit in front of Django. Gateway plus Caddy is 2, the same as `tailscale serve` plus Caddy |
+
+The gateway must pass `X-Forwarded-For` and `X-Forwarded-Proto`; Caddy forwards
+both onward. Without the latter Django believes the request arrived over plain
+HTTP and refuses to set a `Secure` cookie, which looks like a login that
+succeeds and then does nothing.
+
 ## Everyday commands
 
 | Command | What it does |

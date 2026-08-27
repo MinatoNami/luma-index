@@ -15,6 +15,8 @@
 #   4. locks the firewall down to SSH + the tailnet
 #   5. enables unattended security upgrades
 #   6. points `tailscale serve` at Caddy so the app gets real HTTPS
+#      (LUMA_SKIP_TAILSCALE_SERVE=1 leaves step 6 out, for a host where
+#       nginx or another gateway already fronts everything)
 #
 set -euo pipefail
 
@@ -137,7 +139,13 @@ ok "enabled"
 
 # --------------------------------------------------------------------------- #
 step "Tailscale"
-if ! command -v tailscale >/dev/null; then
+if [ "${LUMA_SKIP_TAILSCALE_SERVE:-}" = "1" ]; then
+    ok "skipped: something else terminates TLS and proxies to 127.0.0.1:$CADDY_PORT"
+    info "Nothing here publishes a port beyond loopback, so a gateway in front"
+    info "needs one upstream: http://127.0.0.1:$CADDY_PORT"
+    info "Set LUMA_PUBLIC_ORIGIN and DJANGO_CSRF_TRUSTED_ORIGINS to the origin"
+    info "that gateway serves, scheme and port included, or logins fail CSRF."
+elif ! command -v tailscale >/dev/null; then
     warn "Tailscale is not installed. Install and join the tailnet, then re-run bootstrap:"
     info "  curl -fsSL https://tailscale.com/install.sh | sh"
     info "  tailscale up"
