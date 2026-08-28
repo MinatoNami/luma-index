@@ -45,6 +45,9 @@ services:
     environment:
       NUXT_API_INTERNAL_BASE: http://backend:8000
       NUXT_PUBLIC_API_BASE: /api
+      # The e2e suite reaches the app by service name, which Vite's dev server
+      # treats as an unrecognised Host and refuses.
+      NUXT_DEV_ALLOWED_HOSTS: caddy
     volumes:
       - ./frontend:/app
       - /app/node_modules

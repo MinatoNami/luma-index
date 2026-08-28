@@ -145,7 +145,27 @@ function isCurrent(to: string): boolean {
 </template>
 
 <style scoped>
-.app { min-height: 100dvh; display: flex; background: var(--bg); }
+/**
+ * Everything is held out of the corners here, at every width.
+ *
+ * These insets used to live on .rail — which is display:none below 60rem, so on
+ * a phone nothing carried them at all and the top of every page sat under the
+ * Dynamic Island. The reader looked right only because it is layout:false and
+ * has its own. viewport-fit=cover means the web view is the whole screen, and
+ * the one element that is always there has to be the one that holds the content
+ * off the camera.
+ *
+ * Not padding-bottom: the tab bar takes that, so it can paint its own surface
+ * behind the home indicator instead of leaving a strip of --bg under it.
+ */
+.app {
+  min-height: 100dvh;
+  display: flex;
+  background: var(--bg);
+  padding-top: env(safe-area-inset-top);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
 
 /* -- the rail ------------------------------------------------------------- */
 
@@ -156,10 +176,6 @@ function isCurrent(to: string): boolean {
   flex-direction: column;
   background: var(--surface);
   border-right: 1px solid var(--border);
-  /* viewport-fit=cover means the top of this is under the status bar on a
-     notched phone in standalone mode. */
-  padding-top: env(safe-area-inset-top);
-  padding-left: env(safe-area-inset-left);
 }
 
 .brand {
