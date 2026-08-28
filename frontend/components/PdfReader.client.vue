@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { PageRenderer, loadPdf, quadToBox, renderTextLayer, scaleFor, searchDocument,
+import { PageRenderer, clampScale, loadPdf, quadToBox, renderTextLayer, scaleFor, searchDocument,
          selectionToQuads, type FitMode, type SearchMatch } from '~/composables/usePdf'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 
@@ -32,6 +32,21 @@ const emit = defineEmits<{
   select: [{ page: number; quads: Quad[]; text: string; x: number; y: number }]
   clearSelection: []
   openHighlight: [{ id: number; x: number; y: number }]
+  /**
+   * The scale actually in force, whenever it changes.
+   *
+   * `fit` goes in as a mode or a number; what comes out is the number, and the
+   * toolbar needs it to step zoom from where the page really is rather than
+   * from a guess.
+   */
+  scale: [number]
+  /**
+   * A scale the reader asked for by pinching or by a trackpad zoom.
+   *
+   * The component does not own `fit`, so it cannot zoom itself; it says what
+   * the gesture meant and the page decides.
+   */
+  zoom: [number]
   /** Which way the reader is moving, for anything that hides while reading. */
   scrollDirection: [{ direction: 'up' | 'down'; atTop: boolean }]
 }>()
@@ -82,6 +97,55 @@ const current = ref((props.initialPage ?? 0) + 1)
 const scale = ref(1)
 const baseSize = ref({ width: 612, height: 792 })
 const rendered = reactive(new Set<number>())
+/**
+ * Painted, but at the previous zoom.
+ *
+ * A zoom used to release every canvas and re-render from nothing, so each step
+ * blanked the page and repainted it. These keep their pixels — stretched to the
+ * new size, so they are soft for a moment — and are re-rendered at the new scale
+ * behind that. `rendered` still says "there is something to look at", which is
+ * what keeps the page-number placeholder from flashing over it.
+ */
+const stale = new Set<number>()
+
+/**
+ * How sharp each page is worth being, in device pixels per CSS pixel.
+ *
+ * Every page used to be capped at 2, which is a phone's screen giving back a
+ * third of its resolution on the one page you are actually reading. Neighbours
+ * keep that cap: they exist so a scroll has something to land on, they are
+ * looked at in passing if at all, and they are the ones that add up.
+ */
+const FOCUSED_RATIO = 3
+const NEARBY_RATIO = 2
+
+// What each page has been asked for, so a page can be told it is now worth more
+// than it got. Kept beside `rendered` and cleared with it.
+const ratios = new Map<number, number>()
+
+// A screen with fewer device pixels than this cannot use them, and asking for
+// them would only make the canvas bigger than anything can show.
+const nearbyRatio = () => Math.min(window.devicePixelRatio || 1, NEARBY_RATIO)
+const focusedRatio = () => Math.min(window.devicePixelRatio || 1, FOCUSED_RATIO)
+
+/**
+ * Give the page you have settled on its extra pixels.
+ *
+ * Deliberately not during the scroll. Upgrading whichever page happens to be
+ * nearest the top as the book goes past would render every page twice for a
+ * view nobody stops to look at, and the second render is the expensive one.
+ * Waiting for the scrolling to stop costs one page, once.
+ */
+const SETTLE = 250
+let sharpenTimer: ReturnType<typeof setTimeout> | null = null
+
+function scheduleSharpen() {
+  if (sharpenTimer) clearTimeout(sharpenTimer)
+  sharpenTimer = setTimeout(() => {
+    sharpenTimer = null
+    void renderPage(current.value, focusedRatio())
+  }, SETTLE)
+}
 
 const query = ref('')
 const matches = ref<SearchMatch[]>([])
@@ -113,15 +177,26 @@ const visiblePages = computed(() =>
   props.mode === 'single' ? [current.value] : Array.from({ length: total.value }, (_, i) => i + 1),
 )
 
-async function renderPage(number: number) {
-  if (!renderer || rendered.has(number)) return
+/** Whether this page's canvas is already good enough to leave alone. */
+function upToDate(number: number, ratio: number): boolean {
+  return rendered.has(number) && !stale.has(number) && (ratios.get(number) ?? 0) >= ratio
+}
+
+async function renderPage(number: number, ratio: number) {
+  if (!renderer || upToDate(number, ratio)) return
   const host = hostFor(number)
   const canvas = host?.querySelector('canvas') as HTMLCanvasElement | null
   if (!canvas) return
 
   rendered.add(number)
+  // Recorded before the render, not after. A render in flight is already reason
+  // enough not to start another on the same canvas — PDF.js refuses outright,
+  // and the reader shows the refusal instead of the book. Recording the request
+  // rather than what the budget granted also stops a page the budget cut down
+  // being asked for the same upgrade on every pass.
+  ratios.set(number, ratio)
   try {
-    await renderer.render(number, canvas, scale.value)
+    await renderer.render(number, canvas, scale.value, ratio)
     // Correct the placeholder if this page is a different size from page one.
     if (host) {
       host.style.width = canvas.style.width
@@ -135,8 +210,10 @@ async function renderPage(number: number) {
       if (query.value) markHits(textLayer)
     }
     await paintHighlights(number)
+    stale.delete(number)
   } catch (error: any) {
     rendered.delete(number)
+    ratios.delete(number)
     // Shown, not just emitted. A page that silently fails to render is
     // indistinguishable from one that is still loading, which cost real time
     // to diagnose once already.
@@ -200,6 +277,9 @@ function onLayerClick(event: MouseEvent) {
 
 /** A finished selection inside a page becomes quads the server can store. */
 async function onSelectionEnd(event: MouseEvent | TouchEvent) {
+  // The second finger of a pinch lifts through here too, and a stray selection
+  // popup over a page you just zoomed is the last thing you want.
+  if (pinching.value) return
   const selection = window.getSelection()
   if (!selection || selection.isCollapsed) {
     emit('clearSelection')
@@ -234,11 +314,21 @@ async function onSelectionEnd(event: MouseEvent | TouchEvent) {
 }
 
 function releasePage(number: number) {
-  if (!rendered.has(number)) return
-  rendered.delete(number)
-  renderer?.release(number)
   const host = hostFor(number)
   const canvas = host?.querySelector('canvas') as HTMLCanvasElement | null
+
+  // Not `rendered` alone. A render that throws — a cancellation counts — takes
+  // its page out of the set on the way out, but the canvas was already sized
+  // and allocated by then. Those pages were invisible to every later release:
+  // out of the set, so this returned early, and eight megabytes each stayed
+  // allocated for as long as the reader was open. An inline width is the mark
+  // of a canvas that has been sized, and it is removed below.
+  if (!rendered.has(number) && !canvas?.style.width) return
+
+  rendered.delete(number)
+  stale.delete(number)
+  ratios.delete(number)
+  renderer?.release(number)
   if (canvas) {
     // Zeroing the canvas is what actually frees the backing store; removing the
     // element alone leaves it to the garbage collector's discretion.
@@ -292,7 +382,8 @@ function updateWindow() {
     const number = closest + offset
     if (number >= 1 && number <= total.value) wanted.add(number)
   }
-  for (const number of wanted) renderPage(number)
+  for (const number of wanted) renderPage(number, nearbyRatio())
+  scheduleSharpen()
 
   enforceBudget(closest, wanted)
   emitPosition()
@@ -417,7 +508,7 @@ async function goTo(page: number, fraction = 0) {
     // Started, not awaited. Navigation must not queue behind painting, or a
     // slow page makes the next click feel broken — and a render that never
     // settles would block navigation entirely.
-    void renderPage(clamped)
+    void renderPage(clamped, focusedRatio())
     return
   }
 
@@ -564,13 +655,45 @@ onBeforeUnmount(() => {
   renderer?.destroy()
   if (scrollFrame) cancelAnimationFrame(scrollFrame)
   if (budgetTimer) clearTimeout(budgetTimer)
+  if (sharpenTimer) clearTimeout(sharpenTimer)
 })
 
-// A zoom change invalidates every rendered canvas.
-watch(scale, async () => {
-  for (const number of [...rendered]) releasePage(number)
+/**
+ * A zoom change invalidates every rendered canvas — but not what is on screen.
+ *
+ * The old canvas is stretched to the new size and left in place, so zooming
+ * looks continuous instead of blanking between steps, and the sharp render
+ * replaces it when it arrives. Stretched by resizing rather than by a transform:
+ * a transform would leave the layout box at the old size and the pages would
+ * overlap.
+ */
+watch(scale, async (next, previous) => {
+  emit('scale', next)
+  const factor = previous ? next / previous : 1
+
+  // Only the canvas: the host is sized by pageStyle, which is already computed
+  // from the new scale by the time this render lands.
+  if (factor !== 1) {
+    for (const number of rendered) {
+      const canvas = hostFor(number)?.querySelector('canvas') as HTMLCanvasElement | null
+      if (!canvas?.style.width) continue
+      canvas.style.width = `${Number.parseFloat(canvas.style.width) * factor}px`
+      canvas.style.height = `${Number.parseFloat(canvas.style.height) * factor}px`
+      stale.add(number)
+      ratios.delete(number)
+    }
+  }
+
+  // A pinch or a trackpad zoom asked for this. Put back what was under the
+  // pointer, now that the pages have their new size.
+  if (pinchAnchor && viewport.value) {
+    viewport.value.scrollLeft = factor * (pinchAnchor.scrollLeft + pinchAnchor.x) - pinchAnchor.x
+    viewport.value.scrollTop = factor * (pinchAnchor.scrollTop + pinchAnchor.y) - pinchAnchor.y
+    pinchAnchor = null
+  }
+
   await nextTick()
-  if (props.mode === 'single') void renderPage(current.value)
+  if (props.mode === 'single') void renderPage(current.value, focusedRatio())
   else updateWindow()
 })
 
@@ -580,6 +703,145 @@ watch(() => props.mode, async () => {
   await nextTick()
   void goTo(current.value)
 })
+
+/* -- pinch and trackpad zoom -----------------------------------------------
+ *
+ * The browser's own pinch is no use here: it scales the whole app, chrome
+ * included, and blows up the canvas that is already painted rather than
+ * repainting it, so the text goes soft and stays soft. `touch-action` on the
+ * viewport is what takes the gesture off the browser and gives it to us.
+ *
+ * During the gesture the page column is transformed — one cheap property, no
+ * re-render — and the real render happens once, on release. A canvas cannot be
+ * repainted at sixty frames a second, and does not need to be: the transform
+ * scales the text and highlight layers with it, so everything stays lined up
+ * and the only cost is that it is soft for the moment the fingers are down.
+ */
+
+// The page column, which is what gets transformed. The viewport must not be:
+// it is the thing that scrolls.
+const column = ref<HTMLElement | null>(null)
+
+// Non-null while two fingers are down.
+let pinch: {
+  distance: number
+  scrollLeft: number
+  scrollTop: number
+  x: number
+  y: number
+} | null = null
+
+// The live scale factor, so the transform and the commit cannot disagree.
+let pinchFactor = 1
+
+// Where the viewport must end up once the new scale lands, so the point under
+// the fingers stays under the fingers. Consumed by the scale watcher, which is
+// the first moment the pages actually have their new size.
+let pinchAnchor: { x: number; y: number; scrollLeft: number; scrollTop: number } | null = null
+
+// Suppresses the selection popup, which would otherwise fire on the touchend
+// that ends a pinch.
+const pinching = ref(false)
+
+function gestureIn(event: TouchEvent, element: HTMLElement) {
+  const box = element.getBoundingClientRect()
+  const [a, b] = [event.touches[0], event.touches[1]]
+  return {
+    distance: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1,
+    scrollLeft: element.scrollLeft,
+    scrollTop: element.scrollTop,
+    x: (a.clientX + b.clientX) / 2 - box.left,
+    y: (a.clientY + b.clientY) / 2 - box.top,
+  }
+}
+
+function onTouchStart(event: TouchEvent) {
+  if (event.touches.length !== 2 || !viewport.value) return
+  pinch = gestureIn(event, viewport.value)
+  pinchFactor = 1
+  pinching.value = true
+}
+
+function onTouchMove(event: TouchEvent) {
+  if (!pinch || event.touches.length !== 2) return
+  // Ours now. Without this the viewport scrolls under the gesture as well as
+  // scaling, and the page slides away from the fingers holding it.
+  event.preventDefault()
+
+  const [a, b] = [event.touches[0], event.touches[1]]
+  const distance = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
+  pinchFactor = clampScale(scale.value * (distance / pinch.distance)) / scale.value
+
+  // transform-origin is the column's own top-left, and the translate is what
+  // pins the gesture's midpoint in place. Anchoring by transform-origin alone
+  // would need the origin in the column's coordinates, which change as it
+  // scales; this does not.
+  const x = (1 - pinchFactor) * (pinch.scrollLeft + pinch.x)
+  const y = (1 - pinchFactor) * (pinch.scrollTop + pinch.y)
+  if (column.value) {
+    column.value.style.transformOrigin = '0 0'
+    column.value.style.transform = `translate(${x}px, ${y}px) scale(${pinchFactor})`
+  }
+}
+
+function onTouchEnd(event: TouchEvent) {
+  // A third finger, or lifting one of three: not the end of anything.
+  if (!pinch || event.touches.length >= 2) return
+
+  const gesture = pinch
+  const factor = pinchFactor
+  pinch = null
+  pinchFactor = 1
+  if (column.value) {
+    column.value.style.transform = ''
+    column.value.style.transformOrigin = ''
+  }
+  // Let the touchend that ends the gesture pass before selection is live again.
+  requestAnimationFrame(() => (pinching.value = false))
+
+  const target = clampScale(scale.value * factor)
+  // Two fingers that barely moved were a scroll, or a misfire. Re-rendering the
+  // whole window for half a percent is not worth the flicker.
+  if (Math.abs(target / scale.value - 1) < 0.01) return
+  pinchAnchor = gesture
+  emit('zoom', target)
+}
+
+function onWheel(event: WheelEvent) {
+  // A trackpad pinch arrives as ctrl+wheel — that is how the platform reports
+  // it — and so does ctrl+scroll on a mouse. Both mean zoom.
+  if (!event.ctrlKey || !viewport.value) return
+  event.preventDefault()
+
+  const target = clampScale(scale.value * Math.exp(-event.deltaY / 180))
+  if (Math.abs(target - scale.value) < 0.001) return
+
+  const box = viewport.value.getBoundingClientRect()
+  pinchAnchor = {
+    x: event.clientX - box.left,
+    y: event.clientY - box.top,
+    scrollLeft: viewport.value.scrollLeft,
+    scrollTop: viewport.value.scrollTop,
+  }
+  emit('zoom', target)
+}
+
+// Bound by hand rather than in the template, because both handlers call
+// preventDefault and Vue gives no way to ask for a non-passive listener —
+// which is exactly what the browser defaults these two to.
+watch(viewport, (element, previous) => {
+  previous?.removeEventListener('touchstart', onTouchStart)
+  previous?.removeEventListener('touchmove', onTouchMove)
+  previous?.removeEventListener('touchend', onTouchEnd)
+  previous?.removeEventListener('touchcancel', onTouchEnd)
+  previous?.removeEventListener('wheel', onWheel)
+  if (!element) return
+  element.addEventListener('touchstart', onTouchStart, { passive: true })
+  element.addEventListener('touchmove', onTouchMove, { passive: false })
+  element.addEventListener('touchend', onTouchEnd)
+  element.addEventListener('touchcancel', onTouchEnd)
+  element.addEventListener('wheel', onWheel, { passive: false })
+}, { immediate: true, flush: 'post' })
 
 // A ResizeObserver rather than a window resize listener, because opening the
 // contents sidebar narrows the stage without the window changing size at all —
@@ -624,7 +886,7 @@ onBeforeUnmount(() => resizeObserver?.disconnect())
       <AppIcon name="warning" :size="17" /> {{ failed || pageError }}
     </p>
 
-    <div v-else class="pages" :class="props.mode">
+    <div v-else ref="column" class="pages" :class="[props.mode, { pinching }]">
       <div v-for="number in visiblePages" :key="number" class="page"
            :ref="el => registerHost(number, el as Element | null)"
            :data-page="number" :style="pageStyle">
@@ -649,10 +911,15 @@ onBeforeUnmount(() => resizeObserver?.disconnect())
   overflow: auto;
   overscroll-behavior: contain;
   background: var(--surface-sunken);
+  /* Panning stays the browser's; zooming is ours. Without this the browser
+     takes the pinch and scales the whole app, chrome and all. */
+  touch-action: pan-x pan-y;
 }
 .pages { display: flex; flex-direction: column; align-items: center;
          gap: var(--space-4); padding: var(--space-4); }
 .pages.single { justify-content: center; min-height: 100%; }
+/* Two fingers on a page should not drag a text selection across it. */
+.pages.pinching { user-select: none; }
 .page {
   position: relative;
   background: #fff;

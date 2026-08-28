@@ -69,19 +69,30 @@ export class PageRenderer {
     return page
   }
 
-  async render(number: number, canvas: HTMLCanvasElement, scale: number): Promise<void> {
+  /**
+   * Paint a page.
+   *
+   * `wanted` is how sharp the caller thinks this page is worth being — the one
+   * being read earns more than the ones kept warm either side of it. It is a
+   * request, not an instruction: `affordableRatio` has the final say.
+   */
+  async render(number: number, canvas: HTMLCanvasElement, scale: number,
+               wanted = 2): Promise<void> {
     // A fast scroll queues renders faster than they complete; the stale ones
     // are worthless and would fight the current one for the main thread.
     this.cancel(number)
 
     const page = await this.page(number)
-    const ratio = Math.min(window.devicePixelRatio || 1, 2)
+    // The size on screen, which is what `scale` means, and the size in the
+    // backing store, which is that times the ratio.
+    const css = page.getViewport({ scale })
+    const ratio = affordableRatio(css.width, css.height, wanted)
     const viewport = page.getViewport({ scale: scale * ratio })
 
     canvas.width = Math.floor(viewport.width)
     canvas.height = Math.floor(viewport.height)
-    canvas.style.width = `${Math.floor(viewport.width / ratio)}px`
-    canvas.style.height = `${Math.floor(viewport.height / ratio)}px`
+    canvas.style.width = `${Math.floor(css.width)}px`
+    canvas.style.height = `${Math.floor(css.height)}px`
 
     const context = canvas.getContext('2d', { alpha: false })
     if (!context) return
@@ -121,6 +132,51 @@ export class PageRenderer {
     for (const number of [...this.pages.keys()]) this.release(number)
   }
 }
+
+/**
+ * The most pixels one page's canvas may hold.
+ *
+ * Not a tuning knob — a limit the browser enforces. Past roughly this area a
+ * canvas silently fails to allocate and paints nothing, and the ceiling is
+ * lowest on exactly the devices most likely to hit it, phones with a 3× screen.
+ * PDF.js uses the same number for the same reason.
+ */
+export const MAX_CANVAS_PIXELS = 16_777_216
+
+/**
+ * The device-pixel ratio a page this size can afford.
+ *
+ * Sharpness is bought in pixels and the budget is fixed, so the two ends of the
+ * zoom range trade against each other: a page at 1× can have every device pixel
+ * it asks for, and one at 4× is already large enough on screen that it can give
+ * some back without looking worse.
+ */
+export function affordableRatio(width: number, height: number, wanted: number): number {
+  const area = width * height
+  if (!(area > 0) || !Number.isFinite(wanted)) return 1
+  return Math.max(0.25, Math.min(wanted, Math.sqrt(MAX_CANVAS_PIXELS / area)))
+}
+
+
+/**
+ * How far a reader may zoom.
+ *
+ * Below the lower bound a page is a thumbnail. The upper one is where zooming
+ * stops buying anything: past it the pixel budget is already trading device
+ * resolution away to stay inside itself, so a larger number costs memory and
+ * returns a page no sharper than the one before it.
+ */
+export const MIN_SCALE = 0.25
+export const MAX_SCALE = 4
+
+export function clampScale(scale: number): number {
+  // A pinch that begins with two fingers in the same place divides by zero, and
+  // NaN as a scale renders nothing with nothing to say why. An infinity is just
+  // a very large zoom and clamps like one.
+  if (Number.isNaN(scale)) return 1
+  return Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale))
+}
+
 
 export function scaleFor(
   mode: FitMode,

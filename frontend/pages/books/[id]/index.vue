@@ -368,11 +368,24 @@ watch([mode, fit], ([nextMode, nextFit]) => {
   }, 1200)
 })
 
+/**
+ * Zoom steps from the scale on screen, not from a number picked in advance.
+ *
+ * These used to jump to a literal 1.2 or 0.8 whenever the reader was in a fit
+ * mode — so on a wide window, where fit-width is nearer 1.7, the first press of
+ * "Zoom in" made the page smaller. Multiplying rather than adding also keeps
+ * the step even: +0.2 is most of the page at 0.25 and barely visible at 4.
+ */
+const STEP = 1.25
+
+// What PdfReader resolved `fit` to. Starts at 1 and is corrected on load.
+const effectiveScale = ref(1)
+
 function zoomIn() {
-  fit.value = typeof fit.value === 'number' ? Math.min(4, fit.value + 0.2) : 1.2
+  fit.value = clampScale(effectiveScale.value * STEP)
 }
 function zoomOut() {
-  fit.value = typeof fit.value === 'number' ? Math.max(0.25, fit.value - 0.2) : 0.8
+  fit.value = clampScale(effectiveScale.value / STEP)
 }
 
 async function fullscreen() {
@@ -491,6 +504,8 @@ useHead({ title: computed(() => book.value ? `${book.value.title} — LumaIndex`
                      @position="onPosition"
                      @loaded="({ pageCount }) => (totalPages = pageCount)"
                      @error="msg => (readerError = msg)"
+                     @scale="s => (effectiveScale = s)"
+                     @zoom="s => (fit = clampScale(s))"
                      @select="s => { pendingSelection = s; activeHighlight = null }"
                      @clear-selection="pendingSelection = null"
                      @open-highlight="openHighlight"

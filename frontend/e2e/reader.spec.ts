@@ -193,3 +193,214 @@ test('the page area can be scrolled from the keyboard', async ({ page }) => {
   const after = await viewport.evaluate(el => el.scrollTop)
   expect(after, 'arrow keys should scroll the focused page area').toBeGreaterThan(before)
 })
+
+
+/**
+ * The canvas of the page in the middle of the viewport, and where we are.
+ *
+ * Deliberately not "the first canvas carrying pixels": the reader opens at the
+ * saved position, and the pages it painted on the way there can keep a sized
+ * canvas without being part of the live window. Measuring one of those makes a
+ * zoom look like it did nothing.
+ */
+async function zoomState(page: import('@playwright/test').Page) {
+  return page.evaluate(() => {
+    const viewport = document.querySelector('.viewport') as HTMLElement | null
+    if (!viewport) return null
+    const box = viewport.getBoundingClientRect()
+    const middle = box.top + box.height / 2
+
+    const host = [...document.querySelectorAll('.page')].find((el) => {
+      const r = el.getBoundingClientRect()
+      return r.top <= middle && r.bottom >= middle
+    })
+    const canvas = host?.querySelector('canvas') as HTMLCanvasElement | null
+    if (!canvas || canvas.width <= 300) return null
+    return {
+      cssWidth: Math.round(canvas.getBoundingClientRect().width),
+      backing: canvas.width,
+      scrollTop: Math.round(viewport.scrollTop),
+    }
+  })
+}
+
+test('zooming never blanks the page', async ({ page }) => {
+  // Each zoom step used to release every canvas and re-render from nothing, so
+  // the page went blank and came back. The old pixels are stretched now while
+  // the sharp render happens behind them.
+  await expect.poll(() => paintedCanvases(page), { timeout: 30_000 }).toBeGreaterThan(0)
+
+  const before = await zoomState(page)
+  expect(before).not.toBeNull()
+
+  await revealToolbar(page)
+  await page.getByRole('button', { name: /more reader controls/i }).click()
+  await page.getByRole('menuitem', { name: /^zoom in$/i }).click()
+
+  // Immediately: the canvas must still be carrying pixels, and must already be
+  // wider on screen — that is the stretch standing in for the new render.
+  const during = await zoomState(page)
+  expect(during, 'the canvas was torn down during the zoom').not.toBeNull()
+  expect(during!.backing, 'the backing store was zeroed mid-zoom').toBeGreaterThan(300)
+  expect(during!.cssWidth, 'the page did not grow on screen').toBeGreaterThan(before!.cssWidth)
+
+  // And it still ends up sharp: the backing store grows once the render lands.
+  await expect.poll(async () => (await zoomState(page))?.backing ?? 0, { timeout: 30_000 })
+    .toBeGreaterThan(before!.backing)
+})
+
+
+
+test('a trackpad zoom scales the page and holds its place', async ({ page }) => {
+  await expect.poll(() => paintedCanvases(page), { timeout: 30_000 }).toBeGreaterThan(0)
+  await ensureContinuous(page)
+  // Somewhere down the book, so an anchored zoom has a scroll position to keep.
+  await page.locator('.viewport').evaluate(el => { el.scrollTop = 400 })
+  await page.waitForTimeout(300)
+
+  const before = await zoomState(page)
+  expect(before).not.toBeNull()
+
+  // ctrl+wheel is how a trackpad pinch reaches the page.
+  await page.locator('.viewport').hover()
+  await page.keyboard.down('Control')
+  await page.mouse.wheel(0, -240)
+  await page.keyboard.up('Control')
+  await page.waitForTimeout(200)
+
+  const after = await zoomState(page)
+  expect(after!.cssWidth, 'ctrl+wheel did not zoom').toBeGreaterThan(before!.cssWidth)
+  // Anchored, not reset: zooming in below the top must not send you back to it.
+  expect(after!.scrollTop, 'the zoom threw away the scroll position').toBeGreaterThan(100)
+
+  // And the page must still be sharp afterwards, not a stretched old bitmap.
+  await expect.poll(async () => (await zoomState(page))!.backing, { timeout: 30_000 })
+    .toBeGreaterThan(before!.backing)
+})
+
+test('two fingers zoom the page', async ({ page }) => {
+  await expect.poll(() => paintedCanvases(page), { timeout: 30_000 }).toBeGreaterThan(0)
+  const before = await zoomState(page)
+  expect(before).not.toBeNull()
+
+  // Playwright's touchscreen is one finger. A pinch has to be dispatched.
+  const spread = (from: number, to: number, type: string) => page.evaluate(
+    ({ from, to, type }) => {
+      const target = document.querySelector('.viewport') as HTMLElement
+      const box = target.getBoundingClientRect()
+      const midX = box.left + box.width / 2
+      const midY = box.top + box.height / 2
+      const at = (dx: number) => new Touch({
+        identifier: dx, target,
+        clientX: midX + dx, clientY: midY,
+        pageX: midX + dx, pageY: midY,
+      })
+      const touches = [at(-from / 2), at(to / 2)]
+      target.dispatchEvent(new TouchEvent(type, {
+        touches, targetTouches: touches, changedTouches: touches,
+        bubbles: true, cancelable: true,
+      }))
+    },
+    { from, to, type },
+  )
+
+  await spread(100, 100, 'touchstart')
+  await spread(100, 200, 'touchmove')
+
+  // Mid-gesture the column is transformed rather than re-rendered — that is
+  // what makes a pinch smooth instead of a slideshow of canvases.
+  const transform = await page.locator('.pages').evaluate(el => el.style.transform)
+  expect(transform, 'the pinch did not scale anything').toMatch(/scale\(/)
+
+  await page.evaluate(() => {
+    const target = document.querySelector('.viewport') as HTMLElement
+    target.dispatchEvent(new TouchEvent('touchend', {
+      touches: [], targetTouches: [], changedTouches: [],
+      bubbles: true, cancelable: true,
+    }))
+  })
+  await page.waitForTimeout(300)
+
+  // On release the transform goes and the real size takes over.
+  expect(await page.locator('.pages').evaluate(el => el.style.transform)).toBe('')
+  const after = await zoomState(page)
+  expect(after!.cssWidth, 'the pinch did not commit').toBeGreaterThan(before!.cssWidth)
+})
+
+
+/**
+ * At three device pixels per CSS pixel, which is what a modern phone has.
+ *
+ * The default here is 1×, where "up to 2" and "up to 3" are the same number and
+ * these two would pass without testing anything.
+ */
+test.describe('on a high-resolution screen', () => {
+  test.use({ deviceScaleFactor: 3 })
+
+  test('the page being read is rendered sharper than its neighbours', async ({ page }) => {
+    // The reader used to cap every page at two device pixels per CSS pixel, so a
+    // 3× screen gave back a third of its resolution on the one page in front of
+    // you. The page you settle on is now upgraded; the neighbours kept warm on
+    // either side are not, because they are what add up.
+    await ensureContinuous(page)
+    await expect.poll(() => paintedCanvases(page), { timeout: 30_000 }).toBeGreaterThan(0)
+
+    // Density per CSS pixel, per page, for everything currently carrying pixels.
+    const densities = () => page.evaluate(() => Object.fromEntries(
+      [...document.querySelectorAll('.page')].flatMap((host) => {
+        const canvas = host.querySelector('canvas') as HTMLCanvasElement
+        const css = Number.parseFloat(canvas?.style.width || '0')
+        if (!css || canvas.width <= 300) return []
+        const number = Number((host as HTMLElement).dataset.page)
+        return [[number, Math.round((canvas.width / css) * 100) / 100]]
+      }),
+    ))
+
+    // Settle on page one, so there is no doubt which page is the focused one.
+    await page.locator('.viewport').evaluate(el => { el.scrollTop = 0 })
+
+    // The upgrade is deliberately not part of the first render — it waits for
+    // the scrolling to stop — so this is a poll, not a read.
+    //
+    // Strictly above the neighbours' cap rather than exactly 3: the budget has
+    // the last word, and a browser window is far wider than the phone screens
+    // that actually have three device pixels, so a full-width page here costs
+    // enough to be shaved a little. On a phone it is not.
+    await expect.poll(async () => (await densities())[1] ?? 0, { timeout: 30_000 })
+      .toBeGreaterThan(2)
+
+    const all = await densities()
+    const neighbours = Object.entries(all)
+      .filter(([number]) => Number(number) !== 1)
+      .map(([, density]) => density)
+
+    expect(neighbours.length, 'nothing was prefetched to compare against')
+      .toBeGreaterThan(0)
+    expect(all[1]).toBeLessThanOrEqual(3)
+    // The other half of the point: the pages either side stay at two, because
+    // they are the ones that add up.
+    for (const density of neighbours) expect(density).toBe(2)
+  })
+
+  test('a canvas never exceeds what the browser will allocate', async ({ page }) => {
+    // Zoomed all the way in, a page at full device resolution is large enough
+    // that the browser silently declines to allocate it and paints nothing.
+    await ensureContinuous(page)
+    await expect.poll(() => paintedCanvases(page), { timeout: 30_000 }).toBeGreaterThan(0)
+
+    await revealToolbar(page)
+    for (let step = 0; step < 8; step += 1) {
+      await page.getByRole('button', { name: /more reader controls/i }).click()
+      await page.getByRole('menuitem', { name: /^zoom in$/i }).click()
+    }
+    await page.waitForTimeout(1500)
+
+    const worst = await page.evaluate(() => Math.max(0, ...[...document.querySelectorAll('canvas')]
+      .map(c => (c as HTMLCanvasElement).width * (c as HTMLCanvasElement).height)))
+    expect(worst, 'nothing was painted at full zoom').toBeGreaterThan(0)
+    expect(worst, 'a canvas went past the allocation budget').toBeLessThanOrEqual(16_777_216)
+
+    // And it is still a page, not a blank rectangle.
+    expect(await paintedCanvases(page)).toBeGreaterThan(0)
+  })
+})
