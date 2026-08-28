@@ -192,6 +192,14 @@ LOG_CLIENT_IP = env_bool("LUMA_LOG_CLIENT_IP", False)
 # both sufficient and the safest default. Do not relax this to None without
 # understanding that it makes the session cookie cross-site.
 
+# Scoped to the path this instance is served under, so the cookie is not sent to
+# the other applications sharing the origin behind a path-routing gateway. It is
+# HttpOnly, so none of them could read it — but each would receive it in the
+# request headers, and a session token is not something to hand to a neighbour
+# just because a proxy put them on the same hostname. Empty BASE_PATH gives "/",
+# which is the correct scope for an instance that owns its origin.
+SESSION_COOKIE_PATH = BASE_PATH or "/"
+
 SESSION_COOKIE_NAME = "lumaindex_session"
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
@@ -200,6 +208,10 @@ SESSION_COOKIE_AGE = env_int("DJANGO_SESSION_COOKIE_AGE", 60 * 60 * 24 * 14)
 
 # Readable by JS on purpose: the SPA echoes it back in the X-CSRFToken header.
 # The session cookie above is the one that must stay HttpOnly.
+# Same scope as the session cookie. The SPA lives under the prefix too, so it
+# can still read this one.
+CSRF_COOKIE_PATH = BASE_PATH or "/"
+
 CSRF_COOKIE_NAME = "lumaindex_csrftoken"
 CSRF_COOKIE_HTTPONLY = False
 CSRF_COOKIE_SAMESITE = "Lax"
