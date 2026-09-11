@@ -16,10 +16,30 @@
 
 export type ApiOptions = Parameters<typeof $fetch>[1]
 
+/**
+ * The value of a cookie in a serialised jar — the LAST of that name, not the
+ * first.
+ *
+ * A browser can hold two cookies of one name at different paths, which is what
+ * an instance moving under a path prefix leaves behind: the old cookie at "/"
+ * and the new one at the prefix, both sent on every request. Django's parser
+ * keeps the last occurrence, so the last is the one it will validate against —
+ * and echoing the first fails CSRF on every unsafe request, the login that
+ * would be the way out included. `document.cookie` is serialised like the
+ * Cookie header, so the last here is the last there.
+ *
+ * The backend expires the stale cookie as soon as it sees the duplicate, so
+ * this decides the round trip that does it, and any duplicate after.
+ */
+export function lastCookie(jar: string, name: string): string | null {
+  const matches = [...jar.matchAll(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`, 'g'))]
+  const last = matches.at(-1)
+  return last ? decodeURIComponent(last[1]) : null
+}
+
 function readCookie(name: string): string | null {
   if (!import.meta.client) return null
-  const match = document.cookie.match(new RegExp(`(^|;\\s*)${name}=([^;]*)`))
-  return match ? decodeURIComponent(match[2]) : null
+  return lastCookie(document.cookie, name)
 }
 
 /**

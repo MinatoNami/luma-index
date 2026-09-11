@@ -95,6 +95,10 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
+    # Above the session and CSRF middleware on purpose: it has to see the
+    # response those two produce, the CSRF rejection included, since that is
+    # the request a browser holding the stale cookies gets stuck on.
+    "common.middleware.ExpireRootPathCookies",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",

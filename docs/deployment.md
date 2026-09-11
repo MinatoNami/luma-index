@@ -390,7 +390,7 @@ so headless preview panes render nothing at all.
 | --- | --- |
 | `400 Bad Request` on every page | The MagicDNS name is missing from `DJANGO_ALLOWED_HOSTS`. |
 | Login returns 200 but you stay signed out | `Secure` cookies over plain HTTP. Finish the `tailscale serve` setup, or set both `*_COOKIE_SECURE` to `False`. |
-| `CSRF verification failed` | `DJANGO_CSRF_TRUSTED_ORIGINS` does not exactly match the browser's origin, scheme and port included. |
+| `CSRF verification failed` | Two causes, and the browser page looks the same for both — `deploy.sh logs backend` names which: *Origin checking failed* is `DJANGO_CSRF_TRUSTED_ORIGINS` not exactly matching the browser's origin, scheme and port included. *CSRF token … incorrect* is the browser holding two cookies of one name, left from before `LUMA_BASE_PATH` rescoped them off "/" — the app expires the old one when it sees the pair, so one more request clears it; clearing this site's cookies does it now. |
 | Cannot reach the docker daemon | The `docker` group was just added. Reconnect the SSH session once. |
 | `tailscale serve` fails during bootstrap | HTTPS certificates are not enabled for the tailnet. Admin console → DNS → HTTPS Certificates. |
 | Uploads fail with a 500 | A storage volume is not writable by the container. `entrypoint.sh` refuses to start and names the directory. |
