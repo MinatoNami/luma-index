@@ -457,6 +457,25 @@ class NotebookEntrySerializer(serializers.Serializer):
     updated_at = serializers.DateTimeField()
 
 
+class NotebookBookSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    title = serializers.CharField()
+    highlights = serializers.IntegerField()
+    notes = serializers.IntegerField(help_text="Page notes.")
+    last_at = serializers.DateTimeField(help_text="When the latest was made.")
+
+
+class NotebookTotalsSerializer(serializers.Serializer):
+    highlights = serializers.IntegerField()
+    notes = serializers.IntegerField()
+
+
+class NotebookBooksSerializer(serializers.Serializer):
+    count = serializers.IntegerField(help_text="How many books in total, not how many arrived.")
+    totals = NotebookTotalsSerializer()
+    results = NotebookBookSerializer(many=True)
+
+
 class DailyHighlightSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     book = BookRefSerializer()

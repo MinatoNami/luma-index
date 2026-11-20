@@ -23,13 +23,25 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date
 
-from django.db.models import CharField, F, Q, QuerySet, TextField, Value
+from django.db.models import CharField, Count, F, Max, Q, QuerySet, TextField, Value
 from django.db.models.functions import MD5, Cast, Concat
 
 from .models import Book, Bookmark, Highlight, PageNote
 from .permissions import readable_books
 
 KINDS = ("highlight", "note")
+
+# Newest first is how you find what you marked last week; page order is how you
+# reread what you marked in one book — the way Kindle's notebook lists it, and
+# the way the export already reads.
+ORDERS = {
+    "recent": ("-created_at", "-id"),
+    "page": ("book_title", "book_id", "page", "created_at", "id"),
+}
+
+# How many books the notebook's book list returns. Bounded like every list
+# here; a household that has annotated more than this many books can search.
+BOOK_LIMIT = 500
 
 # A day's worth of looking back, not a review session: enough to be worth the
 # glance on the way to a book, few enough that it is a glance.
@@ -41,8 +53,9 @@ def _open_books(user) -> QuerySet[Book]:
 
 
 def entries(user, *, q: str = "", colour: str = "", kind: str = "",
-            book_id: int | None = None) -> QuerySet:
-    """Highlights and page notes as one queryset of dicts, newest first.
+            book_id: int | None = None, order: str = "recent") -> QuerySet:
+    """Highlights and page notes as one queryset of dicts, newest first or in
+    page order (see ORDERS).
 
     One UNION rather than two lists merged in Python, so `limit`/`offset` and
     `count` are the database's job and a deep page costs the same as the
@@ -91,11 +104,47 @@ def entries(user, *, q: str = "", colour: str = "", kind: str = "",
             ).values("kind", "id", "book_id", "book_title", "page", "text", "note_",
                      "colour_", "created_at", "updated_at"))
 
+    ordering = ORDERS.get(order, ORDERS["recent"])
     if not parts:
         return Highlight.objects.none().values()
     if len(parts) == 1:
-        return parts[0].order_by("-created_at", "-id")
-    return parts[0].union(parts[1], all=True).order_by("-created_at", "-id")
+        return parts[0].order_by(*ordering)
+    return parts[0].union(parts[1], all=True).order_by(*ordering)
+
+
+def books(user) -> tuple[list[dict], dict[str, int], int]:
+    """The books a reader has written on, with how much, most recent first.
+
+    What the notebook's book list shows. Without it, narrowing to one book
+    meant finding an entry from that book first and following its title — the
+    filter existed but could not be discovered. Two aggregates and a merge
+    rather than a UNION, because the answer is one row per book, and a
+    household library is a few hundred books at the very most.
+
+    Returns (books, totals, count): `totals` is highlights and notes across
+    every book, so the kind filter can say how many of each there are.
+    """
+    open_books = _open_books(user)
+    rows: dict[int, dict] = {}
+
+    for model, key in ((Highlight, "highlights"), (PageNote, "notes")):
+        counts = (model.objects.filter(user=user, book__in=open_books)
+                  .values("book_id").annotate(n=Count("id"), last=Max("created_at"))
+                  .order_by())
+        for row in counts:
+            entry = rows.setdefault(row["book_id"], {
+                "id": row["book_id"], "highlights": 0, "notes": 0, "last_at": row["last"]})
+            entry[key] = row["n"]
+            entry["last_at"] = max(entry["last_at"], row["last"])
+
+    titles = dict(Book.objects.filter(pk__in=rows).values_list("pk", "title"))
+    ordered = sorted(rows.values(), key=lambda r: (r["last_at"], r["id"]), reverse=True)
+    for row in ordered:
+        row["title"] = titles.get(row["id"], "")
+
+    totals = {"highlights": sum(r["highlights"] for r in ordered),
+              "notes": sum(r["notes"] for r in ordered)}
+    return ordered[:BOOK_LIMIT], totals, len(ordered)
 
 
 def serialise(row: dict) -> dict:

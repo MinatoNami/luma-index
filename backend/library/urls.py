@@ -46,6 +46,7 @@ urlpatterns = [
     path("continue-reading/", views.ContinueReadingView.as_view(), name="continue-reading"),
 
     path("notebook/", views.NotebookView.as_view(), name="notebook"),
+    path("notebook/books/", views.NotebookBooksView.as_view(), name="notebook-books"),
     path("notebook/daily/", views.NotebookDailyView.as_view(), name="notebook-daily"),
     path("notebook/export", views.NotebookExportView.as_view(), name="notebook-export"),
     path("activity/", views.ActivityView.as_view(), name="activity"),

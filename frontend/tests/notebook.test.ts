@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  goalPercent, localDate, streakLabel, weekday, weekScale,
+  citation, countLabel, defaultOrder, goalPercent, localDate, relativeDay, streakLabel, weekday,
+  weekScale,
 } from '~/composables/useNotebook'
 
 /**
@@ -76,5 +77,41 @@ describe('the weekday label', () => {
     // for every bar in the chart.
     const expected = new Date(2026, 5, 15).toLocaleDateString(undefined, { weekday: 'short' })
     expect(weekday('2026-06-15')).toBe(expected)
+  })
+})
+
+describe('when a note was written', () => {
+  const now = new Date(2026, 10, 21, 1, 0)  // 1am on 21 November
+
+  it('counts calendar days, not 24-hour spans', () => {
+    // Two hours ago, but before midnight: yesterday, not today.
+    expect(relativeDay(new Date(2026, 10, 20, 23, 0).toISOString(), now)).toBe('Yesterday')
+    expect(relativeDay(new Date(2026, 10, 21, 0, 30).toISOString(), now)).toBe('Today')
+  })
+
+  it('falls back to a date, with the year only when it is not this one', () => {
+    const lastWeek = new Date(2026, 10, 12, 9, 0)
+    expect(relativeDay(lastWeek.toISOString(), now)).toBe(
+      lastWeek.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }))
+    const lastYear = new Date(2025, 2, 3, 9, 0)
+    expect(relativeDay(lastYear.toISOString(), now)).toContain('2025')
+  })
+})
+
+describe('the notebook\'s helpers', () => {
+  it('reads a book in page order and the whole notebook newest first', () => {
+    expect(defaultOrder(9)).toBe('page')
+    expect(defaultOrder(null)).toBe('recent')
+  })
+
+  it('copies a passage with where it came from', () => {
+    expect(citation({ text: ' Simplify, simplify. ', book: { id: 1, title: 'Walden' }, page: 90 }))
+      .toBe('“Simplify, simplify.”\n— Walden, page 91')
+  })
+
+  it('counts only what there is', () => {
+    expect(countLabel(2, 1)).toBe('2 highlights · 1 note')
+    expect(countLabel(1, 0)).toBe('1 highlight')
+    expect(countLabel(0, 0)).toBe('Nothing yet')
   })
 })

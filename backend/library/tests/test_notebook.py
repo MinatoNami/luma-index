@@ -320,3 +320,57 @@ def test_an_empty_export_still_says_what_it_is(api, user):
     day = timezone.now().date()
     text = export(api, book=book.pk, today=day.isoformat()).content.decode()
     assert text == f"# Unread\n\nExported from LumaIndex on {day.day} {day:%B %Y}\n"
+
+
+# -- page order and the book list ------------------------------------------------ #
+
+@pytest.mark.django_db
+def test_page_order_reads_like_the_book(api, user):
+    """Within a book, the order you would meet the passages reading it."""
+    walden = make_book(user, "Walden")
+    essays = make_book(user, "Essays")
+    highlight(user, walden, 9, "late page, made first", ago=60)
+    highlight(user, walden, 2, "early page, made last", ago=1)
+    page_note(user, walden, 5, "a note in the middle", ago=30)
+    highlight(user, essays, 1, "another book", ago=10)
+
+    walden_only = [e["text"] for e in listing(api, book=walden.pk, order="page")["results"]]
+    assert walden_only == ["early page, made last", "a note in the middle",
+                           "late page, made first"]
+
+    everything = [e["book"]["title"] for e in listing(api, order="page")["results"]]
+    assert everything == ["Essays", "Walden", "Walden", "Walden"], "books by title"
+
+    assert listing(api, order="sideways")["results"][0]["text"] == "early page, made last", (
+        "an unknown order falls back to newest first")
+
+
+@pytest.mark.django_db
+def test_the_book_list_counts_each_kind_most_recent_first(api, user, other_user):
+    walden = make_book(user, "Walden")
+    essays = make_book(user, "Essays", shared=True)
+    make_book(user, "Untouched")
+    highlight(user, walden, 1, "one", ago=50)
+    highlight(user, walden, 2, "two", ago=40)
+    page_note(user, walden, 3, "a note", ago=45)
+    highlight(user, essays, 1, "latest of all", ago=5)
+    highlight(other_user, essays, 2, "not mine")
+
+    body = api.get(reverse("library:notebook-books")).json()
+
+    assert body["count"] == 2
+    assert body["totals"] == {"highlights": 3, "notes": 1}
+    assert [(b["title"], b["highlights"], b["notes"]) for b in body["results"]] == [
+        ("Essays", 1, 0), ("Walden", 2, 1)]
+
+
+@pytest.mark.django_db
+def test_the_book_list_follows_the_same_rule_as_the_notebook(user, other_user, reader):
+    book = make_book(user, "Was Shared", shared=True)
+    highlight(other_user, book, 1, "made while shared")
+    assert reader.get(reverse("library:notebook-books")).json()["count"] == 1
+
+    book.visibility = Book.Visibility.PRIVATE
+    book.save()
+    assert reader.get(reverse("library:notebook-books")).json() == {
+        "count": 0, "totals": {"highlights": 0, "notes": 0}, "results": []}

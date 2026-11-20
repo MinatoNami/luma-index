@@ -57,6 +57,7 @@ from .serializers import (
     DailySerializer,
     FolderSerializer,
     HighlightSerializer,
+    NotebookBooksSerializer,
     NotebookEntrySerializer,
     PageNoteSerializer,
     ProgressWriteSerializer,
@@ -1229,6 +1230,8 @@ class NotebookView(OwnedMixin, APIView):
             OpenApiParameter("kind", str, enum=list(notebook.KINDS),
                              description="Only highlights, or only page notes."),
             OpenApiParameter("book", int, description="One book's entries."),
+            OpenApiParameter("order", str, enum=list(notebook.ORDERS), description=(
+                "recent (the default): newest first. page: by book, then page.")),
             *PAGE_PARAMS,
         ],
         responses={200: paginated(NotebookEntrySerializer, "PaginatedNotebook")},
@@ -1244,9 +1247,22 @@ class NotebookView(OwnedMixin, APIView):
             colour=colour if colour in Highlight.Colour.values else "",
             kind=kind if kind in notebook.KINDS else "",
             book_id=_optional_int(request.GET.get("book")),
+            order=request.GET.get("order", "recent"),
         )
         page, meta = paginate(rows, request, default=50)
         return Response(envelope([notebook.serialise(row) for row in page], meta))
+
+
+class NotebookBooksView(OwnedMixin, APIView):
+    """The books the reader has written on, with counts, most recent first."""
+
+    @extend_schema(summary="Notebook books", responses={200: NotebookBooksSerializer})
+    def get(self, request):
+        rows, totals, count = notebook.books(request.user)
+        return Response({"count": count, "totals": totals, "results": [{
+            "id": row["id"], "title": row["title"], "highlights": row["highlights"],
+            "notes": row["notes"], "last_at": row["last_at"],
+        } for row in rows]})
 
 
 class NotebookDailyView(OwnedMixin, APIView):

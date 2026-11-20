@@ -104,7 +104,8 @@ def test_limit_and_offset_are_documented(schema, name, args):
 
 
 @pytest.mark.django_db
-@pytest.mark.parametrize("name", ["library:activity", "library:notebook-daily"])
+@pytest.mark.parametrize("name", ["library:activity", "library:notebook-daily",
+                                  "library:notebook-books"])
 def test_the_activity_and_daily_schemas_match_too(schema, reader, name):
     user, _ = reader
     path = reverse(name)

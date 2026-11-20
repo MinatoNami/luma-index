@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  isQuickOpen, matchPlaces, PLACES, shortcutLabel, step,
+  isQuickOpen, matchPlaces, PLACES, shortcutLabel, splitMatch, step,
 } from '~/composables/useQuickOpen'
 
 describe('matching places to what was typed', () => {
@@ -79,5 +79,25 @@ describe('the shortcut', () => {
     expect(shortcutLabel('iPhone')).toBe('⌘K')
     expect(shortcutLabel('Win32')).toBe('Ctrl K')
     expect(shortcutLabel('Linux x86_64')).toBe('Ctrl K')
+  })
+})
+
+describe('marking what was typed in a result', () => {
+  it('splits the label around the first match, ignoring case', () => {
+    expect(splitMatch('Walden — Thoreau', 'wal')).toEqual([
+      { text: 'Wal', match: true },
+      { text: 'den — Thoreau', match: false },
+    ])
+    expect(splitMatch('The Time Machine', 'time')).toEqual([
+      { text: 'The ', match: false },
+      { text: 'Time', match: true },
+      { text: ' Machine', match: false },
+    ])
+  })
+
+  it('leaves the label whole when the text is not in it', () => {
+    // A place found by an alias: "highl" finds Notebook without appearing in it.
+    expect(splitMatch('Notebook', 'highl')).toEqual([{ text: 'Notebook', match: false }])
+    expect(splitMatch('Notebook', '  ')).toEqual([{ text: 'Notebook', match: false }])
   })
 })

@@ -94,6 +94,39 @@ day, and the seven numbers in a visually hidden table. `--chart-bar` is
 `--accent` in light mode and a step deeper in dark, where `--accent` sits above
 the lightness band a chart mark should occupy.
 
+## After a design review
+
+The first cut worked and was in the wrong order. What changed, and why:
+
+- **The home page leads with the book again.** The activity panel had become
+  the first thing on the page, so on a phone the resume card sat below the
+  fold — on a page whose whole job is "where was I". Today is now a ring and a
+  streak beside the welcome (Apple Books' shape); the week and the year are a
+  section further down, after the book and the day's highlights.
+- **The notebook's book filter is findable.** It existed, but only by
+  following a title inside an entry. A list of books with counts down the side
+  (a select on a phone) makes it a click, and a book reads in page order — how
+  you would meet the passages reading it — with newest first a toggle away.
+- **A note can be changed where it is found.** Copy (with its source), add or
+  edit a note, delete with a confirmation — through the per-book endpoints, so
+  the notebook has no write path of its own. The whole card opens the passage,
+  rather than a small link in its corner.
+- **The book's own page shows what you wrote.** Three count tiles looked like
+  buttons and went nowhere; the latest three notes, each opening its page, do
+  the job the section is named for.
+- **Passages in a book face.** Serif for the author's words, sans for yours.
+- **The week chart labels today** and ticks the days that met the goal beside
+  their names rather than by colour; the goal line has headroom so it never
+  reads as the top of the plot. The streak's flame has its own colour instead
+  of borrowing `--warning`, which should only ever mean a warning.
+- **Quick open groups its results** under headings instead of a "Go to" under
+  every place, marks the typed text in titles, and puts the two searches above
+  the places, where a long title list cannot push them out of sight.
+
+**Left open:** the phone's tab bar has five tabs and the notebook is not one of
+them; on a phone it is reached from the home page and from each book's page.
+Which tab gives way is a navigation decision, not a styling one.
+
 ## Not built
 
 | Idea | Seen in | Why not yet |

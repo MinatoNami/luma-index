@@ -89,14 +89,16 @@ function pageLabel(book: Book): string {
 <template>
   <main class="wrap">
     <header class="intro">
-      <h1>{{ firstName ? `Welcome back, ${firstName}` : 'Welcome back' }}</h1>
-      <p v-if="reading.length" class="tertiary">
-        {{ reading.length === 1 ? 'One book on the go.'
-          : `${reading.length} books on the go.` }}
-      </p>
+      <div>
+        <h1>{{ firstName ? `Welcome back, ${firstName}` : 'Welcome back' }}</h1>
+        <p v-if="reading.length" class="tertiary">
+          {{ reading.length === 1 ? 'One book on the go.'
+            : `${reading.length} books on the go.` }}
+        </p>
+      </div>
+      <!-- A glance, not a dashboard: the book you came back for comes first. -->
+      <ReadingToday v-if="showActivity && activity" :activity="activity" />
     </header>
-
-    <ReadingActivity v-if="showActivity && activity" :activity="activity" />
 
     <div v-if="pending" class="skeletons">
       <div v-for="n in 3" :key="n" class="panel skeleton-card" />
@@ -151,12 +153,23 @@ function pageLabel(book: Book): string {
           <li v-for="mark in daily" :key="mark.id" :class="['panel', 'quote', mark.colour]">
             <blockquote>{{ mark.text }}</blockquote>
             <p v-if="mark.note" class="quote-note">{{ mark.note }}</p>
+            <!-- Stretched over the card: anywhere on it opens the passage. -->
             <NuxtLink class="quote-source" :to="`/books/${mark.book.id}?page=${mark.page + 1}`">
               <span class="quote-title">{{ mark.book.title }}</span>
-              <span class="quote-page">p. {{ mark.page + 1 }}</span>
+              <span class="quote-page">Page {{ mark.page + 1 }}</span>
             </NuxtLink>
           </li>
         </ul>
+      </section>
+
+      <section v-if="showActivity && activity" aria-labelledby="week-heading">
+        <div class="head">
+          <h2 id="week-heading">This week</h2>
+          <NuxtLink class="quiet-link" to="/settings#reading-goal">
+            {{ activity.goal_pages ? 'Change goal' : 'Set a goal' }}
+          </NuxtLink>
+        </div>
+        <ReadingWeek :activity="activity" />
       </section>
 
       <section v-if="recent.length" aria-labelledby="recent-heading">
@@ -185,6 +198,10 @@ function pageLabel(book: Book): string {
   display: flex; flex-direction: column; gap: var(--space-6);
 }
 
+.intro {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: var(--space-4);
+}
 .intro h1 { margin: 0; font-size: var(--text-xl); letter-spacing: -0.02em; }
 .intro p { margin: var(--space-1) 0 0; font-size: var(--text-base); }
 
@@ -268,15 +285,19 @@ function pageLabel(book: Book): string {
   position: relative; overflow: hidden;
   display: flex; flex-direction: column; gap: var(--space-3);
   padding: var(--space-4) var(--space-4) var(--space-3) var(--space-5);
+  transition: border-color var(--duration-fast) var(--ease),
+              box-shadow var(--duration-fast) var(--ease);
 }
+.quote:hover { border-color: var(--border-strong); box-shadow: var(--shadow-md); }
 /* The pen the passage was marked with, down the edge. */
 .quote::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; }
 .quote.yellow::before { background: var(--hl-yellow); }
 .quote.green::before { background: var(--hl-green); }
 .quote.blue::before { background: var(--hl-blue); }
 .quote.pink::before { background: var(--hl-pink); }
+/* The author's words in the book face; your note beneath, in the app's. */
 .quote blockquote {
-  margin: 0; font-size: var(--text-base); line-height: 1.6;
+  margin: 0; font-family: var(--font-serif); font-size: 1.0625rem; line-height: 1.55;
   display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden;
   white-space: pre-line; overflow-wrap: anywhere;
 }
@@ -290,7 +311,11 @@ function pageLabel(book: Book): string {
   min-height: 28px; padding-top: var(--space-1);
   font-size: var(--text-sm); color: var(--text-secondary); text-decoration: none;
 }
-.quote-source:hover { color: var(--text); }
+.quote-source::after { content: ""; position: absolute; inset: 0; }
+.quote-source:focus-visible { outline: none; }
+.quote-source:focus-visible::after { outline: 2px solid var(--focus); outline-offset: -2px;
+                                     border-radius: var(--radius-lg); }
+.quote:hover .quote-title { color: var(--text); }
 .quote-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
                font-weight: 500; }
 .quote-page { flex: none; color: var(--accent-text); }

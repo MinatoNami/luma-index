@@ -68,3 +68,19 @@ export function isQuickOpen(event: Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrl
   return (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey
     && event.key.toLowerCase() === 'k'
 }
+
+/**
+ * A label split around the first place the query appears, so the typed text
+ * can be marked in the result. Case-insensitive; returns the label whole when
+ * the query is not in it (a place found by an alias, say).
+ */
+export function splitMatch(label: string, query: string): { text: string; match: boolean }[] {
+  const q = query.trim()
+  const at = q ? label.toLowerCase().indexOf(q.toLowerCase()) : -1
+  if (at < 0) return [{ text: label, match: false }]
+  return [
+    { text: label.slice(0, at), match: false },
+    { text: label.slice(at, at + q.length), match: true },
+    { text: label.slice(at + q.length), match: false },
+  ].filter(part => part.text)
+}

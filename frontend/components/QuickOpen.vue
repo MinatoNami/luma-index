@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Book } from '~/composables/useLibrary'
-import { matchPlaces, PLACES, step, type Place } from '~/composables/useQuickOpen'
+import { matchPlaces, PLACES, splitMatch, step, type Place } from '~/composables/useQuickOpen'
 
 /**
  * Jump to any book, or any part of the app, from the keyboard.
@@ -21,6 +21,8 @@ const library = useLibrary()
 interface Option {
   key: string
   kind: 'book' | 'place' | 'action'
+  /** The heading it is listed under. */
+  group: string
   label: string
   detail?: string
   icon?: string
@@ -40,35 +42,62 @@ const loading = ref(false)
 const active = ref(0)
 let previouslyFocused: HTMLElement | null = null
 
+/**
+ * One flat list, because the arrow keys walk it top to bottom; the headings
+ * are drawn from each option's `group` where it changes. Grouped rather than
+ * labelled one by one — a "Go to" under every place was the same two words
+ * four times.
+ */
 const options = computed<Option[]>(() => {
   const q = query.value.trim()
-  const bookOption = (book: Book, detail?: string): Option => ({
-    key: `book-${book.id}`, kind: 'book', label: book.title, book,
+  const bookOption = (book: Book, group: string, detail?: string): Option => ({
+    key: `book-${book.id}`, kind: 'book', group, label: book.title, book,
     detail, to: `/books/${book.id}`,
   })
 
   if (!q) {
     // Nothing typed: where you were, then everywhere you can go.
     return [
-      ...reading.value.slice(0, 5).map(b =>
-        bookOption(b, b.progress ? `${Math.round(b.progress.percentage)}% read` : undefined)),
+      ...reading.value.slice(0, 5).map(b => bookOption(b, 'Continue reading',
+        b.progress ? `${Math.round(b.progress.percentage)}% read` : undefined)),
       ...PLACES_SHOWN.map(placeOption),
     ]
   }
 
+  // Searches before places: a title list long enough to scroll would
+  // otherwise push "search inside" — the way on when no title is right —
+  // below the fold, while a section is rarely what a typed word is after.
   return [
-    ...books.value.map(b => bookOption(b, folderOf(b))),
+    ...books.value.map(b => bookOption(b, 'Books', folderOf(b))),
+    { key: 'inside', kind: 'action', group: 'Search', icon: 'search',
+      label: `Inside every book for “${q}”`, to: `/library?q=${encodeURIComponent(q)}` },
+    { key: 'notes', kind: 'action', group: 'Search', icon: 'notebook',
+      label: `Your notebook for “${q}”`, to: `/notebook?q=${encodeURIComponent(q)}` },
     ...matchPlaces(q).map(placeOption),
-    { key: 'inside', kind: 'action', icon: 'search', label: `Search inside books for “${q}”`,
-      to: `/library?q=${encodeURIComponent(q)}` },
-    { key: 'notes', kind: 'action', icon: 'notebook', label: `Search your notebook for “${q}”`,
-      to: `/notebook?q=${encodeURIComponent(q)}` },
   ]
 })
 
+const groups = computed(() => {
+  const out: { label: string; items: { option: Option; index: number }[] }[] = []
+  options.value.forEach((option, index) => {
+    const last = out[out.length - 1]
+    if (last?.label === option.group) last.items.push({ option, index })
+    else out.push({ label: option.group, items: [{ option, index }] })
+  })
+  return out
+})
+
+/** The label with the typed text marked — not in a search action, which
+ * quotes the query back and would mark the whole of it. */
+function parts(option: Option) {
+  return option.kind === 'action'
+    ? [{ text: option.label, match: false }]
+    : splitMatch(option.label, query.value)
+}
+
 function placeOption(place: Place): Option {
-  return { key: `place-${place.to}`, kind: 'place', icon: place.icon, label: place.label,
-           detail: 'Go to', to: place.to }
+  return { key: `place-${place.to}`, kind: 'place', group: 'Go to', icon: place.icon,
+           label: place.label, to: place.to }
 }
 
 function folderOf(book: Book): string | undefined {
@@ -91,7 +120,7 @@ watch(query, (value) => {
     const mine = ++generation
     try {
       const body = await api<{ results: Book[] }>('/library/books/', {
-        params: { search: q, limit: 8, sort: 'name' },
+        params: { search: q, limit: 6, sort: 'name' },
       })
       if (mine === generation) books.value = body.results ?? []
     } catch {
@@ -175,30 +204,35 @@ const activeId = computed(() =>
         <kbd class="esc">Esc</kbd>
       </div>
 
-      <ul id="quick-options" class="options" role="listbox" aria-label="Results">
-        <li v-if="!query.trim() && reading.length" class="group" role="presentation">
-          Continue reading
-        </li>
-        <li v-for="(option, i) in options" :id="`quick-option-${i}`" :key="option.key"
-            role="option" :aria-selected="i === active"
-            :class="['option', option.kind, { active: i === active }]"
-            @mousemove="active = i" @click="choose(option)">
-          <span v-if="option.book" class="cover"><BookCover :book="option.book" size="sm" /></span>
-          <span v-else class="glyph"><AppIcon :name="option.icon || 'file'" :size="16" /></span>
-          <span class="text">
-            <span class="label">{{ option.label }}</span>
-            <span v-if="option.detail" class="detail">{{ option.detail }}</span>
-          </span>
-          <AppIcon v-if="i === active" name="chevron-right" :size="15" class="enter" />
-        </li>
-        <li v-if="query.trim() && !loading && !books.length" class="none" role="presentation">
-          No titles match. Try searching inside the books.
-        </li>
-      </ul>
+      <div id="quick-options" class="options" role="listbox" aria-label="Results">
+        <div v-for="(group, g) in groups" :key="group.label" class="group" role="group"
+             :aria-labelledby="`quick-group-${g}`">
+          <div :id="`quick-group-${g}`" class="group-label" role="presentation">
+            {{ group.label }}
+          </div>
+          <div v-for="{ option, index } in group.items" :id="`quick-option-${index}`"
+               :key="option.key" role="option" :aria-selected="index === active"
+               :class="['option', option.kind, { active: index === active }]"
+               @mousemove="active = index" @click="choose(option)">
+            <span v-if="option.book" class="cover"><BookCover :book="option.book" size="sm" /></span>
+            <span v-else class="glyph"><AppIcon :name="option.icon || 'file'" :size="16" /></span>
+            <span class="text">
+              <span class="label"><template v-for="(part, j) in parts(option)" :key="j"><mark
+                v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
+              <span v-if="option.detail" class="detail">{{ option.detail }}</span>
+            </span>
+            <AppIcon v-if="index === active" name="chevron-right" :size="15" class="enter" />
+          </div>
+        </div>
+      </div>
+      <p v-if="query.trim() && !loading && !books.length" class="none" role="status">
+        No titles match “{{ query.trim() }}”. Search inside the books instead.
+      </p>
 
       <footer class="keys" aria-hidden="true">
         <span><kbd>↑</kbd><kbd>↓</kbd> move</span>
         <span><kbd>↵</kbd> open</span>
+        <span><kbd>esc</kbd> close</span>
       </footer>
     </div>
   </div>
@@ -235,13 +269,22 @@ kbd {
   font-family: var(--font-sans); font-size: 0.6875rem;
 }
 
-.options { list-style: none; margin: 0; padding: var(--space-2); overflow-y: auto; flex: 1; }
-.group, .none {
+.options { padding: var(--space-1) var(--space-2) var(--space-2); overflow-y: auto; flex: 1; }
+.group + .group { margin-top: var(--space-1); }
+.group-label {
   padding: var(--space-2) var(--space-3) var(--space-1);
-  font-size: var(--text-xs); color: var(--text-tertiary);
+  font-size: var(--text-xs); font-weight: 600; letter-spacing: 0.04em;
+  text-transform: uppercase; color: var(--text-tertiary);
 }
-.group { font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
-.none { padding: var(--space-3); font-size: var(--text-sm); }
+.none {
+  margin: 0; padding: 0 var(--space-5) var(--space-3);
+  font-size: var(--text-sm); color: var(--text-tertiary);
+}
+mark {
+  background: none; color: inherit; font-weight: 600;
+  text-decoration: underline; text-decoration-color: var(--accent);
+  text-decoration-thickness: 2px; text-underline-offset: 3px;
+}
 
 .option {
   display: flex; align-items: center; gap: var(--space-3);

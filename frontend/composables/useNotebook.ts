@@ -47,6 +47,65 @@ export interface NotebookFilters {
   kind?: 'highlight' | 'note' | ''
   colour?: HighlightColour | ''
   book?: number | null
+  order?: NotebookOrder
+}
+
+/** Newest first, or the order you would meet them reading the book. */
+export type NotebookOrder = 'recent' | 'page'
+
+/** A book the reader has written on, as the notebook's book list shows it. */
+export interface NotebookBook {
+  id: number
+  title: string
+  highlights: number
+  /** Page notes. */
+  notes: number
+  last_at: string
+}
+
+/**
+ * The order a notebook lists in when nobody has chosen one.
+ *
+ * Across every book, newest first: that is how you find what you marked last
+ * week. Within one book, page order: that is how you reread it, and how
+ * Kindle's notebook lists a book.
+ */
+export function defaultOrder(bookId: number | null | undefined): NotebookOrder {
+  return bookId ? 'page' : 'recent'
+}
+
+/**
+ * A passage as it travels on the clipboard: quoted, with where it came from,
+ * so a paste into a message or a note still says whose words they are.
+ */
+export function citation(entry: Pick<NotebookEntry, 'text' | 'book' | 'page'>): string {
+  return `“${entry.text.trim()}”\n— ${entry.book.title}, page ${entry.page + 1}`
+}
+
+/**
+ * When something was written, in calendar days where the reader is: "Today",
+ * "Yesterday", then a date. Counted in calendar days, not 24-hour spans — a
+ * note made at 11pm is "Yesterday" at 1am, not "Today".
+ */
+export function relativeDay(iso: string, now: Date = new Date()): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ''
+  const midnight = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+  const days = Math.round((midnight(now) - midnight(date)) / 86_400_000)
+  if (days === 0) return 'Today'
+  if (days === 1) return 'Yesterday'
+  return date.toLocaleDateString(undefined, {
+    day: 'numeric', month: 'short',
+    ...(date.getFullYear() === now.getFullYear() ? {} : { year: 'numeric' }),
+  })
+}
+
+/** "2 highlights · 1 note", leaving out what there is none of. */
+export function countLabel(highlights: number, notes: number): string {
+  const parts: string[] = []
+  if (highlights) parts.push(`${highlights} ${highlights === 1 ? 'highlight' : 'highlights'}`)
+  if (notes) parts.push(`${notes} ${notes === 1 ? 'note' : 'notes'}`)
+  return parts.join(' · ') || 'Nothing yet'
 }
 
 interface Envelope<T> { count: number; limit: number; offset: number; results: T[] }
@@ -99,7 +158,7 @@ export function weekday(iso: string): string {
 }
 
 export function useNotebook() {
-  const { api } = useApi()
+  const { api, ensureCsrf } = useApi()
   const apiUrl = useApiUrl()
 
   function params(filters: NotebookFilters) {
@@ -108,7 +167,37 @@ export function useNotebook() {
     if (filters.kind) out.kind = filters.kind
     if (filters.colour) out.colour = filters.colour
     if (filters.book) out.book = filters.book
+    if (filters.order) out.order = filters.order
     return out
+  }
+
+  async function books() {
+    return await api<{ count: number; totals: { highlights: number; notes: number }
+                       results: NotebookBook[] }>('/library/notebook/books/')
+  }
+
+  /**
+   * Change what an entry says: a highlight's note, or a page note's body.
+   * Through the per-book endpoints, so the notebook has no write path of its
+   * own to keep in step with the reader's.
+   */
+  async function edit(entry: NotebookEntry, text: string): Promise<NotebookEntry> {
+    await ensureCsrf()
+    const base = `/library/books/${entry.book.id}`
+    if (entry.kind === 'highlight') {
+      const saved = await api<{ note: string; updated_at: string }>(
+        `${base}/highlights/${entry.id}`, { method: 'PATCH', body: { note: text } })
+      return { ...entry, note: saved.note, updated_at: saved.updated_at }
+    }
+    const saved = await api<{ body: string; updated_at: string }>(
+      `${base}/notes/${entry.id}`, { method: 'PATCH', body: { body: text } })
+    return { ...entry, text: saved.body, updated_at: saved.updated_at }
+  }
+
+  async function remove(entry: NotebookEntry): Promise<void> {
+    await ensureCsrf()
+    const kind = entry.kind === 'highlight' ? 'highlights' : 'notes'
+    await api(`/library/books/${entry.book.id}/${kind}/${entry.id}`, { method: 'DELETE' })
   }
 
   async function list(filters: NotebookFilters, options: { limit?: number; offset?: number } = {}) {
@@ -138,5 +227,5 @@ export function useNotebook() {
     return `${apiUrl('/library/notebook/export')}?${query}`
   }
 
-  return { list, daily, activity, exportUrl }
+  return { list, books, daily, activity, exportUrl, edit, remove }
 }
