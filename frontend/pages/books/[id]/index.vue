@@ -310,12 +310,23 @@ function onPageHide() {
   flush({ keepalive: true })
 }
 
+// And on being hidden, because pagehide alone is not enough on a phone. A tab
+// switched away from — another app, the home screen, the tab switcher — gets
+// visibilitychange, and may then be discarded by the OS without ever seeing a
+// pagehide. Hidden is the last moment a backgrounded reader is sure to get.
+// Whichever of the two comes second finds nothing pending and sends nothing.
+function onVisibilityChange() {
+  if (document.visibilityState === 'hidden') flush({ keepalive: true })
+}
+
 onMounted(() => {
   window.addEventListener('pagehide', onPageHide)
+  document.addEventListener('visibilitychange', onVisibilityChange)
   window.addEventListener('keydown', onKey)
 })
 onBeforeUnmount(() => {
   window.removeEventListener('pagehide', onPageHide)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
   window.removeEventListener('keydown', onKey)
   flush()
 })

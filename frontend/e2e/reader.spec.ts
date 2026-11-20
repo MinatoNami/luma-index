@@ -194,20 +194,27 @@ test('the page area can be scrolled from the keyboard', async ({ page }) => {
   expect(after, 'arrow keys should scroll the focused page area').toBeGreaterThan(before)
 })
 
-test('the page being read when the tab closes is the one saved', async ({ page, bookId }) => {
-  // Positions are saved on a four-second debounce, and the write meant to
-  // catch the last few seconds as a tab closes was a sendBeacon: a POST, with
-  // no CSRF header, to an endpoint that only takes PUT. It was refused every
-  // time, so closing the tab straight after turning a page lost the page.
+/**
+ * Move to another page and stop inside the save debounce.
+ *
+ * Positions are saved on a four-second debounce, so whatever a reader does in
+ * the last four seconds before leaving is only kept if the leaving itself
+ * sends it. This sets that moment up: a new page, read for less than the
+ * debounce, with proof that no ordinary save has carried it yet — so a test
+ * that then finds it on the server is measuring the write made on the way
+ * out, and nothing else.
+ *
+ * Returns the zero-based page the server should end up holding, and every
+ * progress PUT as it is sent, with when.
+ */
+async function readBrieflyElsewhere(page: import('@playwright/test').Page, bookId: string) {
   const room = await scrollableBy(page)
   test.skip(room < 500, `this book only scrolls ${room}px — nowhere to move to`)
 
-  // Every ordinary save, so the test can show it was not one of these that
-  // carried the new page.
-  const saved: number[] = []
+  const saved: { page: number; at: number }[] = []
   page.on('request', (request) => {
     if (request.method() === 'PUT' && request.url().endsWith(`/books/${bookId}/progress`)) {
-      saved.push(JSON.parse(request.postData() ?? '{}').page)
+      saved.push({ page: JSON.parse(request.postData() ?? '{}').page, at: Date.now() })
     }
   })
 
@@ -222,19 +229,52 @@ test('the page being read when the tab closes is the one saved', async ({ page, 
   const movedAt = Date.now()
   await expect(jump).not.toHaveAttribute('placeholder', before ?? '')
   await page.waitForTimeout(300)
-  const reading = Number(await jump.getAttribute('placeholder'))
+  const target = Number(await jump.getAttribute('placeholder')) - 1
 
-  expect(Date.now() - movedAt, 'too slow to close inside the debounce — this proves nothing')
+  expect(Date.now() - movedAt, 'too slow to leave inside the debounce — this proves nothing')
     .toBeLessThan(3_500)
-  expect(saved, 'an ordinary save already carried the new page').not.toContain(reading - 1)
+  expect(saved.map(s => s.page), 'an ordinary save already carried the new page')
+    .not.toContain(target)
+
+  return { target, saved, movedAt }
+}
+
+async function savedPage(request: import('@playwright/test').APIRequestContext, bookId: string) {
+  const response = await request.get(`/api/library/books/${bookId}/progress`)
+  return (await response.json()).page as number
+}
+
+test('the page being read when the tab closes is the one saved', async ({ page, bookId }) => {
+  // The write meant for this was a sendBeacon: a POST, with no CSRF header, to
+  // an endpoint that only takes PUT. It was refused every time, so closing the
+  // tab straight after turning a page lost the page.
+  const { target } = await readBrieflyElsewhere(page, bookId)
 
   const context = page.context()
   await page.close()
 
-  await expect.poll(async () => {
-    const response = await context.request.get(`/api/library/books/${bookId}/progress`)
-    return (await response.json()).page
-  }, { timeout: 10_000 }).toBe(reading - 1)
+  await expect.poll(() => savedPage(context.request, bookId), { timeout: 10_000 }).toBe(target)
+})
+
+test('the page being read when the tab is hidden is saved straight away', async ({ page, bookId }) => {
+  // On a phone, switching to another app hides the tab, and the OS may then
+  // discard it without a pagehide ever arriving. Hidden is the last moment
+  // the reader is sure to get, so the position has to go then, not when the
+  // debounce would have got round to it.
+  const { target, saved, movedAt } = await readBrieflyElsewhere(page, bookId)
+
+  // Headless Chromium has no other app to switch to, so this is the browser's
+  // side of it: the state reads hidden and the event fires.
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' })
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
+
+  await expect.poll(() => saved.find(s => s.page === target)?.at ?? null, { timeout: 2_000 })
+    .not.toBeNull()
+  const sentAfter = saved.find(s => s.page === target)!.at - movedAt
+  expect(sentAfter, 'sent by the debounce, not by being hidden').toBeLessThan(3_000)
+  await expect.poll(() => savedPage(page.request, bookId), { timeout: 10_000 }).toBe(target)
 })
 
 
