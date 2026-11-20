@@ -9,6 +9,9 @@ const profile = ref<Profile | null>(null)
 const displayName = ref('')
 const theme = ref<Theme>('system')
 const libraryView = ref<LibraryView>('list')
+// Pages a day; 0 is no goal, which is where everyone starts.
+const dailyGoal = ref(0)
+const GOAL_PRESETS = [0, 10, 20, 30, 50]
 const usage = ref<{
   free_bytes: number; max_upload_bytes: number; book_count: number
   quota_bytes: number; used_bytes: number
@@ -67,6 +70,7 @@ onMounted(async () => {
   displayName.value = p.display_name
   theme.value = s!.theme
   libraryView.value = s!.library_view
+  dailyGoal.value = s!.daily_page_goal ?? 0
   usage.value = u
 })
 
@@ -103,6 +107,15 @@ const saveAppearance = () => run('appearance', async () => {
   await account.saveSettings({ theme: theme.value, library_view: libraryView.value })
   applyTheme(theme.value)
   localStorage.setItem('lumaindex-view', libraryView.value)
+})
+
+const saveGoal = () => run('goal', async () => {
+  const pages = Math.round(Number(dailyGoal.value))
+  if (!Number.isFinite(pages) || pages < 0 || pages > 1000) {
+    throw { data: { detail: 'A goal is between 0 and 1000 pages a day.' } }
+  }
+  await account.saveSettings({ daily_page_goal: pages })
+  dailyGoal.value = pages
 })
 
 const savePassword = () => run('password', async () => {
@@ -194,6 +207,42 @@ const removeAccount = () => run('delete', async () => {
           <span v-else />
           <AppButton variant="primary" :loading="saving === 'appearance'"
                      @click="saveAppearance">Save appearance</AppButton>
+        </footer>
+      </section>
+
+      <!-- Reading goal -->
+      <section id="reading-goal" class="panel card">
+        <div class="card-head">
+          <h2>Reading goal</h2>
+          <p class="muted">
+            Pages a day, shown on Reading now with your streak. A page counts
+            when you arrive on it, so going back over one is still one page.
+          </p>
+        </div>
+        <div class="card-body">
+          <div class="field">
+            <label for="daily-goal">Pages a day</label>
+            <div class="goal-row">
+              <input id="daily-goal" v-model.number="dailyGoal" type="number" min="0"
+                     max="1000" step="1" inputmode="numeric" />
+              <div class="presets" role="group" aria-label="Common goals">
+                <button v-for="preset in GOAL_PRESETS" :key="preset" type="button"
+                        class="preset" :aria-pressed="dailyGoal === preset"
+                        @click="dailyGoal = preset">{{ preset || 'None' }}</button>
+              </div>
+            </div>
+            <p class="hint">0 means no goal. Your streak is counted either way.</p>
+          </div>
+        </div>
+        <footer class="card-foot">
+          <p v-if="errors.goal" class="inline-error">{{ errors.goal }}</p>
+          <p v-else-if="saved.goal" class="inline-ok">
+            <AppIcon name="check" :size="15" /> Saved
+          </p>
+          <span v-else />
+          <AppButton variant="primary" :loading="saving === 'goal'" @click="saveGoal">
+            Save goal
+          </AppButton>
         </footer>
       </section>
 
@@ -344,6 +393,28 @@ select {
   border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
 }
 select:focus-visible { outline: none; border-color: var(--focus); box-shadow: var(--shadow-focus); }
+
+.goal-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+input[type="number"] {
+  width: 7rem; min-height: var(--tap-target); padding: 0 var(--space-3);
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+}
+input[type="number"]:focus-visible {
+  outline: none; border-color: var(--focus); box-shadow: var(--shadow-focus);
+}
+.presets { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.preset {
+  min-height: 32px; min-width: 44px; padding: 0 var(--space-3);
+  background: var(--surface); color: var(--text-secondary);
+  border: 1px solid var(--border); border-radius: var(--radius-full);
+  font-size: var(--text-sm); cursor: pointer;
+}
+.preset:hover { background: var(--surface-hover); color: var(--text); }
+.preset[aria-pressed="true"] {
+  background: var(--accent-soft); border-color: var(--accent); color: var(--accent-text);
+  font-weight: 500;
+}
 
 .facts { display: grid; grid-template-columns: auto 1fr; gap: var(--space-2) var(--space-5);
          margin: 0; font-size: var(--text-base); }

@@ -43,6 +43,11 @@ class UserSettings(models.Model):
     reader_zoom = models.CharField(max_length=16, default="fit-width")
     sidebar_open = models.BooleanField(default=True)
 
+    # Pages a day, or 0 for no goal — the default, because a target nobody
+    # chose is a nag. A column rather than a key in `preferences`, so the
+    # serializer can bound it.
+    daily_page_goal = models.PositiveSmallIntegerField(default=0)
+
     # Anything not yet worth a column of its own.
     preferences = models.JSONField(default=dict, blank=True)
 

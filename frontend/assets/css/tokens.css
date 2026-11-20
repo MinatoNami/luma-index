@@ -62,6 +62,21 @@
 
   --focus: #4B4ACF;
 
+  /* -- highlights -------------------------------------------------------- */
+  /* The four pens. Fills behind text, never text themselves, so they are the
+     same in both themes: a highlight is the colour you chose. */
+  --hl-yellow: #FFD64F;
+  --hl-green: #7ED994;
+  --hl-blue: #82B1FF;
+  --hl-pink: #FF9CC4;
+
+  /* -- charts ------------------------------------------------------------ */
+  /* One series, so one hue. Validated against --surface in each theme
+     (lightness band, contrast >= 3:1); dark mode takes a deeper step than
+     --accent, which sits above the band there. */
+  --chart-bar: #4B4ACF;
+  --chart-grid: #DFDCD4;
+
   /* -- elevation --------------------------------------------------------- */
   /* Light themes read depth from shadow; the dark overrides swap to borders,
      because a black shadow on a dark ground is invisible. */
@@ -146,6 +161,9 @@
 
     --focus: #8E8CFF;
 
+    --chart-bar: #7E7CF5;
+    --chart-grid: #2E2C33;
+
     --shadow-sm: 0 1px 2px rgb(0 0 0 / 40%);
     --shadow-md: 0 2px 8px rgb(0 0 0 / 45%);
     --shadow-lg: 0 12px 32px rgb(0 0 0 / 55%);
@@ -185,6 +203,9 @@
   --warning-soft: #2E2415;
 
   --focus: #8E8CFF;
+
+  --chart-bar: #7E7CF5;
+  --chart-grid: #2E2C33;
 
   --shadow-sm: 0 1px 2px rgb(0 0 0 / 40%);
   --shadow-md: 0 2px 8px rgb(0 0 0 / 45%);

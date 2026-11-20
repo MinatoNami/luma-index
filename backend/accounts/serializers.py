@@ -163,7 +163,10 @@ class UserSettingsSerializer(serializers.ModelSerializer):
         from .settings_models import UserSettings
 
         model = UserSettings
-        fields = ("theme", "library_view", "reader_mode", "reader_zoom", "sidebar_open")
+        fields = ("theme", "library_view", "reader_mode", "reader_zoom", "sidebar_open",
+                  "daily_page_goal")
+        # A goal past a thousand pages a day is a typo, not an ambition.
+        extra_kwargs = {"daily_page_goal": {"min_value": 0, "max_value": 1000}}
 
 
 class AccountDeleteSerializer(serializers.Serializer):

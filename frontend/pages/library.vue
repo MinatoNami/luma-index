@@ -15,7 +15,9 @@ const currentId = computed(() => {
   return raw === undefined || raw === 'root' ? null : Number(raw)
 })
 
-const search = ref('')
+// Seeded from ?q= so another page — quick open, chiefly — can hand over a
+// search rather than only a place.
+const search = ref(typeof route.query.q === 'string' ? route.query.q : '')
 const busy = ref(false)
 const error = ref('')
 const notice = ref('')
@@ -587,7 +589,7 @@ const insideHits = ref<SearchHit[]>([])
 const searchingInside = ref(false)
 const MIN_TERM = 3
 
-watch(search, (term) => {
+function searchInside(term: string) {
   const q = term.trim()
   if (q.length < MIN_TERM) { insideHits.value = []; return }
   searchingInside.value = true
@@ -602,7 +604,12 @@ watch(search, (term) => {
       searchingInside.value = false
     }
   }, 300)
-})
+}
+
+watch(search, searchInside)
+// A search that arrived in the URL was applied to the listing during the
+// server render; the inside-the-books half needs the browser.
+onMounted(() => { if (search.value) searchInside(search.value) })
 
 const isEmpty = computed(() => !folders.value.length && !books.value.length)
 

@@ -12,6 +12,8 @@
  * screen it is a rail down the side; on a narrow one, a tab bar along the
  * bottom, where a thumb can reach it.
  */
+import { isQuickOpen, shortcutLabel } from '~/composables/useQuickOpen'
+
 const route = useRoute()
 const { user, logout } = useAuth()
 const library = useLibrary()
@@ -58,6 +60,7 @@ const sections: Section[] = [
   { label: 'Recent', icon: 'inbox', to: '/library?view=recent' },
   { label: 'Unsorted', icon: 'file', to: '/library?view=unsorted' },
   { label: 'Collections', icon: 'collection', to: '/collections', tab: true },
+  { label: 'Notebook', icon: 'notebook', to: '/notebook' },
   { label: 'Shared', icon: 'inbox', to: '/shared' },
   { label: 'Trash', icon: 'trash', to: '/trash' },
 ]
@@ -66,6 +69,32 @@ const tabs = computed(() => [
   ...sections.filter(s => s.tab),
   { label: 'Settings', icon: 'settings', to: '/settings' },
 ])
+
+/**
+ * Quick open, behind ⌘K / Ctrl K on every page that has this shell.
+ *
+ * The shortcut is taken even from inside a text field — that is where people
+ * press it, and no field here has a use of its own for it — but never while
+ * another dialog is open, which owns the keyboard until it closes.
+ */
+const quickOpen = ref(false)
+const shortcut = ref('⌘K')
+
+function onShortcut(event: KeyboardEvent) {
+  if (!isQuickOpen(event)) return
+  if (!quickOpen.value && document.querySelector('[aria-modal="true"]')) return
+  event.preventDefault()
+  quickOpen.value = !quickOpen.value
+}
+
+onMounted(() => {
+  shortcut.value = shortcutLabel(navigator.platform || navigator.userAgent)
+  window.addEventListener('keydown', onShortcut)
+})
+onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut))
+
+// Following a result navigates; the dialog should not survive the trip.
+watch(() => route.fullPath, () => { quickOpen.value = false })
 
 /**
  * Whether a section is the one being looked at.
@@ -91,6 +120,13 @@ function isCurrent(to: string): boolean {
         <AppLogo :size="24" />
         <strong>LumaIndex</strong>
       </NuxtLink>
+
+      <button type="button" class="find" @click="quickOpen = true">
+        <AppIcon name="search" :size="16" />
+        <span>Find</span>
+        <kbd aria-hidden="true">{{ shortcut }}</kbd>
+        <span class="sr-only">(shortcut {{ shortcut }})</span>
+      </button>
 
       <div class="links">
         <NuxtLink v-for="section in sections" :key="section.to" :to="section.to"
@@ -131,6 +167,8 @@ function isCurrent(to: string): boolean {
     <div class="content">
       <slot />
     </div>
+
+    <QuickOpen v-if="quickOpen" @close="quickOpen = false" />
 
     <!-- Narrow screens only: within thumb reach, not stacked above the content. -->
     <nav class="tabs" aria-label="Sections">
@@ -186,6 +224,22 @@ function isCurrent(to: string): boolean {
 .brand strong { font-size: var(--text-md); letter-spacing: -0.01em; }
 
 .links { display: flex; flex-direction: column; gap: 2px; padding: 0 var(--space-3); }
+
+.find {
+  display: flex; align-items: center; gap: var(--space-2);
+  margin: 0 var(--space-3) var(--space-3);
+  min-height: 36px; padding: 0 var(--space-2) 0 var(--space-3);
+  background: var(--bg); color: var(--text-tertiary);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  font-size: var(--text-base); text-align: left; cursor: pointer;
+}
+.find:hover { color: var(--text-secondary); border-color: var(--border-strong); }
+.find span:not(.sr-only) { flex: 1; }
+.find kbd {
+  padding: 1px var(--space-1);
+  border: 1px solid var(--border); border-radius: 4px;
+  background: var(--surface); font-family: var(--font-sans); font-size: 0.6875rem;
+}
 
 .link {
   display: flex; align-items: center; gap: var(--space-2);

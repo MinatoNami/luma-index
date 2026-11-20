@@ -4,6 +4,7 @@ import type { Book } from '~/composables/useLibrary'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 
 import type { Highlight, HighlightColour, Quad } from '~/composables/useAnnotations'
+import { localDate } from '~/composables/useNotebook'
 
 // Full bleed: the reader draws its own chrome, which hides on scroll, and a
 // rail down the side would take width from the page and never get out of
@@ -285,6 +286,9 @@ async function flush() {
         // Lets the server drop this write if a later position already arrived
         // from another device.
         client_updated_at: new Date().toISOString(),
+        // The day this page counts towards, in the reader's own calendar
+        // rather than the server's UTC one — see library/activity.py.
+        local_date: localDate(),
       },
     })
   } catch {

@@ -64,6 +64,7 @@ PAGINATED = [
     ("library:folders", ()),
     ("library:shared", ()),
     ("library:collections", ()),
+    ("library:notebook", ()),
 ]
 
 
@@ -100,3 +101,12 @@ def test_limit_and_offset_are_documented(schema, name, args):
     operation = schema["paths"][reverse(name, args=args)]["get"]
     documented = {p["name"] for p in operation.get("parameters", [])}
     assert {"limit", "offset"} <= documented, f"{name} does not document paging"
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("name", ["library:activity", "library:notebook-daily"])
+def test_the_activity_and_daily_schemas_match_too(schema, reader, name):
+    user, _ = reader
+    path = reverse(name)
+    body = signed_in(user).get(path).json()
+    assert declared_keys(schema, path) == set(body)

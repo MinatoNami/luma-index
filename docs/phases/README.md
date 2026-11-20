@@ -1,7 +1,7 @@
 # Implementation phases
 
 One document per phase from PRD §44, recording what each decided and why. All
-seven are built; these are kept as the design record, not as current
+seven are built, and an eighth went beyond §44 into §43's future features; these are kept as the design record, not as current
 documentation — the [README](../../README.md) describes what the system does
 now.
 
@@ -14,6 +14,7 @@ now.
 | 5 — Bookmarks, highlights, notes | [05-reading-data.md](05-reading-data.md) |
 | 6 — Sharing | [06-sharing.md](06-sharing.md) |
 | 7 — Hardening | [07-hardening.md](07-hardening.md) |
+| 8 — Notebook, reading activity, quick open | [08-notebook-and-activity.md](08-notebook-and-activity.md) |
 
 Phase 3 finished last rather than third, which was the right order: three of its
 virtual views (Continue Reading, Recently Opened, Shared With Me) need models

@@ -14,6 +14,7 @@ import { formatBytes } from '~/composables/useLibrary'
  */
 const route = useRoute()
 const library = useLibrary()
+const notebook = useNotebook()
 
 const bookId = computed(() => Number(route.params.id))
 
@@ -152,6 +153,16 @@ const annotationTotal = computed(() => {
                 <span>{{ book.annotations.notes === 1 ? 'Page note' : 'Page notes' }}</span>
               </li>
             </ul>
+            <div v-if="annotationTotal" class="note-actions">
+              <NuxtLink class="action" :to="`/notebook?book=${book.id}`">
+                <AppIcon name="notebook" :size="16" /> Open in notebook
+              </NuxtLink>
+              <!-- Markdown, because it is what Obsidian, Logseq and a plain
+                   editor all take without a plugin. -->
+              <a class="action" :href="notebook.exportUrl(book.id)" download>
+                <AppIcon name="download" :size="16" /> Export as Markdown
+              </a>
+            </div>
             <p v-else class="tertiary">
               Nothing yet. Select text while reading to highlight it.
             </p>
@@ -241,6 +252,16 @@ const annotationTotal = computed(() => {
 .counts { list-style: none; margin: 0; padding: 0; display: flex; gap: var(--space-3); }
 .counts li { flex: 1; padding: var(--space-3) var(--space-4); }
 .counts strong { display: block; font-size: var(--text-xl); letter-spacing: -0.02em; }
+
+.note-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-3); }
+.action {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  min-height: var(--tap-target); padding: 0 var(--space-4);
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); box-shadow: var(--shadow-sm);
+  font-size: var(--text-base); font-weight: 500; text-decoration: none;
+}
+.action:hover { background: var(--surface-hover); color: var(--text); }
 .counts span { font-size: var(--text-sm); color: var(--text-secondary); }
 
 @media (max-width: 48rem) {
