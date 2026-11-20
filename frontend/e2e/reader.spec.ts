@@ -194,6 +194,49 @@ test('the page area can be scrolled from the keyboard', async ({ page }) => {
   expect(after, 'arrow keys should scroll the focused page area').toBeGreaterThan(before)
 })
 
+test('the page being read when the tab closes is the one saved', async ({ page, bookId }) => {
+  // Positions are saved on a four-second debounce, and the write meant to
+  // catch the last few seconds as a tab closes was a sendBeacon: a POST, with
+  // no CSRF header, to an endpoint that only takes PUT. It was refused every
+  // time, so closing the tab straight after turning a page lost the page.
+  const room = await scrollableBy(page)
+  test.skip(room < 500, `this book only scrolls ${room}px — nowhere to move to`)
+
+  // Every ordinary save, so the test can show it was not one of these that
+  // carried the new page.
+  const saved: number[] = []
+  page.on('request', (request) => {
+    if (request.method() === 'PUT' && request.url().endsWith(`/books/${bookId}/progress`)) {
+      saved.push(JSON.parse(request.postData() ?? '{}').page)
+    }
+  })
+
+  // Let any save already scheduled by opening the book land first.
+  await page.waitForTimeout(4_500)
+
+  const jump = page.getByLabel('Jump to page')
+  const before = await jump.getAttribute('placeholder')
+  const viewport = page.locator('.viewport')
+  const at = await viewport.evaluate(el => el.scrollTop / el.scrollHeight)
+  await viewport.evaluate((el, f) => { el.scrollTop = el.scrollHeight * f }, at > 0.5 ? 0.2 : 0.7)
+  const movedAt = Date.now()
+  await expect(jump).not.toHaveAttribute('placeholder', before ?? '')
+  await page.waitForTimeout(300)
+  const reading = Number(await jump.getAttribute('placeholder'))
+
+  expect(Date.now() - movedAt, 'too slow to close inside the debounce — this proves nothing')
+    .toBeLessThan(3_500)
+  expect(saved, 'an ordinary save already carried the new page').not.toContain(reading - 1)
+
+  const context = page.context()
+  await page.close()
+
+  await expect.poll(async () => {
+    const response = await context.request.get(`/api/library/books/${bookId}/progress`)
+    return (await response.json()).page
+  }, { timeout: 10_000 }).toBe(reading - 1)
+})
+
 
 /**
  * The canvas of the page in the middle of the viewport, and where we are.
