@@ -4,7 +4,10 @@ import type { Book } from '~/composables/useLibrary'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 
 import type { Highlight, HighlightColour, Quad } from '~/composables/useAnnotations'
-import { progressBody, type ReadingPosition } from '~/composables/readingProgress'
+import {
+  nextWrite, progressBody, savePlan,
+  type ProgressWrite, type ReadingPosition, type SaveReason,
+} from '~/composables/readingProgress'
 
 // Full bleed: the reader draws its own chrome, which hides on scroll, and a
 // rail down the side would take width from the page and never get out of
@@ -258,6 +261,9 @@ const percentage = computed(() =>
 // -- progress -------------------------------------------------------------- //
 
 let pending: ReadingPosition | null = null
+// The write sent but not yet acknowledged. Kept, so that leaving the page
+// while it is still on its way can send it again — see `nextWrite`.
+let inFlight: ProgressWrite | null = null
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 
 function onPosition(position: ReadingPosition) {
@@ -266,36 +272,45 @@ function onPosition(position: ReadingPosition) {
   // Debounced: a scroll produces a position on every frame, and §21 asks for
   // throttled writes rather than one per pixel.
   if (saveTimer) return
-  saveTimer = setTimeout(() => flush(), 4000)
+  saveTimer = setTimeout(() => flush('timer'), 4000)
 }
 
 /**
- * Send the latest position now, if there is one not yet sent.
+ * Send the latest position now, if there is one the server has not had.
  *
- * `keepalive` is for when the page is going away. The browser carries such a
- * request on after the document is gone, where it would cancel any other —
- * and nothing is awaited before it, because nothing awaited at that point is
- * sure to run. So it skips `ensureCsrf()` and relies on the CSRF cookie being
- * there already, which it is for anyone who has signed in.
+ * Every write is `keepalive`. They are a few dozen bytes, and the browser
+ * carries such a request on after the document is gone — so the ordinary
+ * four-second save is not cancelled if the tab closes while it is on its way.
+ *
+ * `reason` says what is happening — see `savePlan`. Leaving the book, by any
+ * route, resends a write still unacknowledged, in case it failed or was the one
+ * the browser dropped. Only a page that is unloading skips `ensureCsrf()`,
+ * relying on the cookie being there already, as it is for anyone signed in.
  */
-async function flush({ keepalive = false } = {}) {
+async function flush(reason: SaveReason = 'timer') {
+  const { leaving, awaitCsrf } = savePlan(reason)
   // Whatever was scheduled is this write, sent early.
   if (saveTimer) {
     clearTimeout(saveTimer)
     saveTimer = null
   }
-  if (!pending) return
-  const position = pending
+  const write = nextWrite(pending, inFlight, { leaving })
+  if (!write) return
   pending = null
+  inFlight = write
   try {
-    if (!keepalive) await ensureCsrf()
+    if (awaitCsrf) await ensureCsrf()
     await api(`/library/books/${bookId.value}/progress`, {
       method: 'PUT',
-      body: progressBody(position),
-      keepalive,
+      body: progressBody(write.position, write.at),
+      keepalive: true,
     })
+    // Only this write's own answer clears it; a newer one sent meanwhile is
+    // the one now outstanding.
+    if (inFlight === write) inFlight = null
   } catch {
-    // Losing a progress update is not worth interrupting a reader over.
+    // Losing a progress update is not worth interrupting a reader over. It
+    // stays in flight, so leaving the page still has a chance to resend it.
   }
 }
 
@@ -307,16 +322,17 @@ async function flush({ keepalive = false } = {}) {
 // every unsafe method. The beacon that used to be here was refused on both
 // counts, so the last few seconds of every session were never saved.
 function onPageHide() {
-  flush({ keepalive: true })
+  flush('unload')
 }
 
 // And on being hidden, because pagehide alone is not enough on a phone. A tab
 // switched away from — another app, the home screen, the tab switcher — gets
 // visibilitychange, and may then be discarded by the OS without ever seeing a
 // pagehide. Hidden is the last moment a backgrounded reader is sure to get.
-// Whichever of the two comes second finds nothing pending and sends nothing.
+// Whichever comes second may resend an unacknowledged write; the same write
+// twice, with one timestamp, saves the same position.
 function onVisibilityChange() {
-  if (document.visibilityState === 'hidden') flush({ keepalive: true })
+  if (document.visibilityState === 'hidden') flush('unload')
 }
 
 onMounted(() => {
@@ -328,7 +344,9 @@ onBeforeUnmount(() => {
   window.removeEventListener('pagehide', onPageHide)
   document.removeEventListener('visibilitychange', onVisibilityChange)
   window.removeEventListener('keydown', onKey)
-  flush()
+  // Leaving the reader inside the app: no pagehide will come, so this is the
+  // last chance to resend a save that failed or is still unconfirmed.
+  flush('navigate')
 })
 
 // -- navigation ------------------------------------------------------------- //
