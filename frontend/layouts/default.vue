@@ -51,16 +51,18 @@ interface Section {
   to: string
   /** Shown in the bottom tab bar as well as the rail. */
   tab?: boolean
+  /** The tab bar's label, where the rail's would not fit a sixth of a phone. */
+  short?: string
 }
 
 const sections: Section[] = [
-  { label: 'Reading now', icon: 'clock', to: '/', tab: true },
+  { label: 'Reading now', short: 'Reading', icon: 'clock', to: '/', tab: true },
   { label: 'Library', icon: 'folder', to: '/library', tab: true },
   { label: 'Favourites', icon: 'star', to: '/library?view=favourites', tab: true },
   { label: 'Recent', icon: 'inbox', to: '/library?view=recent' },
   { label: 'Unsorted', icon: 'file', to: '/library?view=unsorted' },
   { label: 'Collections', icon: 'collection', to: '/collections', tab: true },
-  { label: 'Notebook', icon: 'notebook', to: '/notebook' },
+  { label: 'Notebook', icon: 'notebook', to: '/notebook', tab: true },
   { label: 'Shared', icon: 'inbox', to: '/shared' },
   { label: 'Trash', icon: 'trash', to: '/trash' },
 ]
@@ -176,7 +178,7 @@ function isCurrent(to: string): boolean {
                 :class="['tab', { current: isCurrent(tab.to) }]"
                 :aria-current="isCurrent(tab.to) ? 'page' : undefined">
         <AppIcon :name="tab.icon" :size="21" />
-        <span>{{ tab.label }}</span>
+        <span>{{ 'short' in tab && tab.short ? tab.short : tab.label }}</span>
       </NuxtLink>
     </nav>
   </div>
@@ -307,6 +309,14 @@ function isCurrent(to: string): boolean {
     min-height: 52px;
     color: var(--text-tertiary); text-decoration: none;
     font-size: var(--text-xs);
+    /* Six tabs since the notebook joined: about 62px each on a 375px phone,
+       so a label may not wrap or push its neighbour. */
+    min-width: 0;
+  }
+  .tab span {
+    max-width: 100%; padding: 0 1px;
+    font-size: 0.6875rem; letter-spacing: -0.01em;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .tab.current { color: var(--accent-text); font-weight: 500; }
 }
