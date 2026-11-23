@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { nextWrite, progressBody } from '~/composables/readingProgress'
+import { localDate } from '~/composables/useNotebook'
 
 /**
  * What a progress write says, in the shape `ProgressWriteSerializer` reads.
@@ -18,7 +19,14 @@ describe('the body of a progress write', () => {
       page: 12,
       page_fraction: 0.4,
       client_updated_at: '2026-11-21T07:30:00.000Z',
+      local_date: localDate(at),
     })
+  })
+
+  it('carries the reader\'s own date, so the page counts towards their day', () => {
+    // Built from the same moment as the timestamp, on the local calendar.
+    expect(progressBody({ page: 1, fraction: 0 }, at).local_date).toBe(localDate(at))
+    expect(progressBody({ page: 1, fraction: 0 }, at).local_date).toMatch(/^\d{4}-\d{2}-\d{2}$/)
   })
 
   it('never sends the reader-side name for the fraction', () => {

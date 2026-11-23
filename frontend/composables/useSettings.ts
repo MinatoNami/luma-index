@@ -16,6 +16,8 @@ export interface UserSettings {
   reader_mode: 'continuous' | 'single'
   reader_zoom: string
   sidebar_open: boolean
+  /** Pages a day. 0 means no goal. */
+  daily_page_goal: number
 }
 
 export function useSettings() {

@@ -24,7 +24,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from . import bulk, chunked, sorting
+from . import activity, bulk, chunked, notebook, sorting
 from .fulltext import MAX_HITS, search
 from .lifecycle import readers_of, set_visibility
 from .models import (
@@ -47,14 +47,18 @@ from .quota import QuotaExceeded, ensure_room, limit_for, usage_for
 from .ranges import serve_file
 from .retention import retention_days
 from .serializers import (
+    ActivitySerializer,
     BookDetailSerializer,
     BookmarkSerializer,
     BookSerializer,
     BulkActionSerializer,
     ChunkedUploadStartSerializer,
     CollectionSerializer,
+    DailySerializer,
     FolderSerializer,
     HighlightSerializer,
+    NotebookBooksSerializer,
+    NotebookEntrySerializer,
     PageNoteSerializer,
     ProgressWriteSerializer,
     ReadingProgressSerializer,
@@ -858,12 +862,21 @@ class BookProgressView(OwnedMixin, APIView):
             page = data["page"]
             if book.page_count:
                 page = min(page, book.page_count - 1)
+            moved = page != record.page
+            now = timezone.now()
+            day = activity.local_today(data.get("local_date"))
             record.page = page
             record.page_fraction = data["page_fraction"]
             record.percentage = self._percentage(page, data["page_fraction"], book.page_count)
-            record.last_opened_at = timezone.now()
+            record.last_opened_at = now
             record.client_updated_at = incoming
+            activity.mark_finished(record, now, day)
             record.save()
+
+            # Arriving somewhere new is reading; reopening where you left off,
+            # or the same page reported again while you sit on it, is not.
+            if moved:
+                activity.record_arrival(request.user, book, page, day)
 
         return Response(ReadingProgressSerializer(record).data)
 
@@ -1191,3 +1204,162 @@ class BookFavouriteView(OwnedMixin, APIView):
         book = self.get_readable_book(book_id)
         UserBookState.objects.filter(user=request.user, book=book).update(is_favourite=False)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# --------------------------------------------------------------------------- #
+# Notebook — every highlight and note, across books
+# --------------------------------------------------------------------------- #
+
+def _optional_int(raw: str | None) -> int | None:
+    try:
+        return int(raw) if raw not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
+class NotebookView(OwnedMixin, APIView):
+    """The reader's highlights and page notes, newest first, from every book
+    they can still open. See `library/notebook.py`."""
+
+    @extend_schema(
+        summary="Notebook",
+        parameters=[
+            OpenApiParameter("q", str, description="Text in the passage, note, or book title."),
+            OpenApiParameter("colour", str, enum=list(Highlight.Colour.values),
+                             description="Highlights of this colour only."),
+            OpenApiParameter("kind", str, enum=list(notebook.KINDS),
+                             description="Only highlights, or only page notes."),
+            OpenApiParameter("book", int, description="One book's entries."),
+            OpenApiParameter("order", str, enum=list(notebook.ORDERS), description=(
+                "recent (the default): newest first. page: by book, then page.")),
+            *PAGE_PARAMS,
+        ],
+        responses={200: paginated(NotebookEntrySerializer, "PaginatedNotebook")},
+    )
+    def get(self, request):
+        # Unknown values are ignored rather than refused, like a nonsense page
+        # size: a filter nobody can satisfy is not worth a 400.
+        colour = request.GET.get("colour", "")
+        kind = request.GET.get("kind", "")
+        rows = notebook.entries(
+            request.user,
+            q=request.GET.get("q", "").strip()[:200],
+            colour=colour if colour in Highlight.Colour.values else "",
+            kind=kind if kind in notebook.KINDS else "",
+            book_id=_optional_int(request.GET.get("book")),
+            order=request.GET.get("order", "recent"),
+        )
+        page, meta = paginate(rows, request, default=50)
+        return Response(envelope([notebook.serialise(row) for row in page], meta))
+
+
+class NotebookBooksView(OwnedMixin, APIView):
+    """The books the reader has written on, with counts, most recent first."""
+
+    @extend_schema(summary="Notebook books", responses={200: NotebookBooksSerializer})
+    def get(self, request):
+        rows, totals, count = notebook.books(request.user)
+        return Response({"count": count, "totals": totals, "results": [{
+            "id": row["id"], "title": row["title"], "highlights": row["highlights"],
+            "notes": row["notes"], "last_at": row["last_at"],
+        } for row in rows]})
+
+
+class NotebookDailyView(OwnedMixin, APIView):
+    """A few highlights to see again today — the same few all day."""
+
+    @extend_schema(
+        summary="Today's highlights",
+        parameters=[OpenApiParameter("today", str, description=(
+            "The reader's date, YYYY-MM-DD. Ignored if it is more than a day "
+            "from the server's."))],
+        responses={200: DailySerializer},
+    )
+    def get(self, request):
+        today = activity.local_today(request.GET.get("today"))
+        picks = notebook.daily(request.user, today)
+        return Response({
+            "date": today.isoformat(),
+            "results": [{
+                "id": mark.pk,
+                "book": {"id": mark.book_id, "title": mark.book.title},
+                "page": mark.page,
+                "text": mark.selected_text,
+                "note": mark.note,
+                "colour": mark.colour,
+            } for mark in picks],
+        })
+
+
+class NotebookExportView(OwnedMixin, APIView):
+    """Annotations as a Markdown file — one book's, or every book's.
+
+    Markdown because it is what Obsidian, Logseq, Notion and a plain text
+    editor all take without a plugin; it is the format Readwise and Zotero
+    export to for the same reason. What leaves is the reader's own writing,
+    so this needs nothing beyond being able to open the book.
+    """
+
+    @extend_schema(
+        summary="Export annotations as Markdown",
+        parameters=[
+            OpenApiParameter("book", int, description=(
+                "One book. Without it, every book you have annotated.")),
+            OpenApiParameter("today", str, description=(
+                "The reader's date, YYYY-MM-DD, for the file's date stamp.")),
+        ],
+        responses={200: OpenApiResponse(description="text/markdown attachment")},
+    )
+    def get(self, request):
+        from django.http import HttpResponse
+        from django.utils.text import slugify
+
+        raw = request.GET.get("book")
+        if raw not in (None, ""):
+            book_id = _optional_int(raw)
+            if book_id is None:
+                raise Http404
+            book = self.get_readable_book(book_id)
+            books = [book]
+            stem = slugify(book.title)[:80] or "book"
+        else:
+            books = notebook.books_with_annotations(request.user)
+            stem = "notebook"
+
+        # The reader's date, like everywhere else a "today" is shown: a file
+        # exported over breakfast in Singapore should not be dated yesterday.
+        text = notebook.to_markdown(
+            request.user, books,
+            exported_on=activity.local_today(request.GET.get("today")))
+        response = HttpResponse(text, content_type="text/markdown; charset=utf-8")
+        # ASCII by construction — slugify drops anything else — so no RFC 5987
+        # filename* is needed for a header every browser will honour.
+        response["Content-Disposition"] = f'attachment; filename="{stem}-notes.md"'
+        # Somebody's notes: not for a shared cache.
+        response["Cache-Control"] = "private, no-store"
+        return response
+
+
+# --------------------------------------------------------------------------- #
+# Reading activity
+# --------------------------------------------------------------------------- #
+
+class ActivityView(OwnedMixin, APIView):
+    """Pages read today against the goal, the streak, and the last week.
+
+    See `library/activity.py` for what counts as a page read.
+    """
+
+    @extend_schema(
+        summary="Reading activity",
+        parameters=[OpenApiParameter("today", str, description=(
+            "The reader's date, YYYY-MM-DD. Ignored if it is more than a day "
+            "from the server's."))],
+        responses={200: ActivitySerializer},
+    )
+    def get(self, request):
+        from accounts.settings_models import UserSettings
+
+        today = activity.local_today(request.GET.get("today"))
+        goal = UserSettings.for_user(request.user).daily_page_goal
+        return Response(activity.summary(request.user, today, goal=goal))

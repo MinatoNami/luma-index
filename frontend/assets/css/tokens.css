@@ -62,6 +62,26 @@
 
   --focus: #4B4ACF;
 
+  /* -- highlights -------------------------------------------------------- */
+  /* The four pens. Fills behind text, never text themselves, so they are the
+     same in both themes: a highlight is the colour you chose. */
+  --hl-yellow: #FFD64F;
+  --hl-green: #7ED994;
+  --hl-blue: #82B1FF;
+  --hl-pink: #FF9CC4;
+
+  /* -- charts ------------------------------------------------------------ */
+  /* One series, so one hue. Validated against --surface in each theme
+     (lightness band, contrast >= 3:1); dark mode takes a deeper step than
+     --accent, which sits above the band there. */
+  --chart-bar: #4B4ACF;
+  --chart-grid: #DFDCD4;
+
+  /* The streak's flame. Its own colour rather than --warning, which means
+     "something needs attention" and should keep meaning only that. A
+     graphic, so it needs 3:1 against the surface, not 4.5. */
+  --flame: #D9480F;
+
   /* -- elevation --------------------------------------------------------- */
   /* Light themes read depth from shadow; the dark overrides swap to borders,
      because a black shadow on a dark ground is invisible. */
@@ -79,6 +99,11 @@
   /* -- type -------------------------------------------------------------- */
   --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
     Roboto, "Helvetica Neue", Arial, sans-serif;
+  /* For the author's words, never the app's. A passage quoted back to you —
+     in the notebook, on the home page — is set in a book face, so it reads
+     as the book speaking and your note beside it, in the sans, as you. */
+  --font-serif: ui-serif, "Iowan Old Style", Charter, "Palatino Linotype", Georgia,
+    Cambria, "Times New Roman", serif;
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 
   --text-xs: 0.75rem;
@@ -146,6 +171,10 @@
 
     --focus: #8E8CFF;
 
+    --chart-bar: #7E7CF5;
+    --chart-grid: #2E2C33;
+    --flame: #FF8A3D;
+
     --shadow-sm: 0 1px 2px rgb(0 0 0 / 40%);
     --shadow-md: 0 2px 8px rgb(0 0 0 / 45%);
     --shadow-lg: 0 12px 32px rgb(0 0 0 / 55%);
@@ -185,6 +214,10 @@
   --warning-soft: #2E2415;
 
   --focus: #8E8CFF;
+
+  --chart-bar: #7E7CF5;
+  --chart-grid: #2E2C33;
+  --flame: #FF8A3D;
 
   --shadow-sm: 0 1px 2px rgb(0 0 0 / 40%);
   --shadow-md: 0 2px 8px rgb(0 0 0 / 45%);

@@ -1,3 +1,5 @@
+import { localDate } from '~/composables/useNotebook'
+
 /** Where a reader is: a zero-based page, and how far down it, 0–1. */
 export interface ReadingPosition { page: number; fraction: number }
 
@@ -17,6 +19,10 @@ export function progressBody(position: ReadingPosition, at: Date = new Date()) {
     // Lets the server drop this write if a later position already arrived
     // from another device.
     client_updated_at: at.toISOString(),
+    // The day this page counts towards, on the reader's own calendar rather
+    // than the server's UTC one — see library/activity.py. Here rather than at
+    // one call site, so the last-gasp write on leaving counts it too.
+    local_date: localDate(at),
   }
 }
 

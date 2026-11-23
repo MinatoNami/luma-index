@@ -29,6 +29,10 @@ single upstream and the app is never exposed by accident.
 | **Read** | PDF.js: continuous scroll or single page, zoom, text selection, in-book search, outline sidebar, page thumbnails. The toolbar hides as you read forward and returns when you scroll up. |
 | **Resume** | Your place is saved as you read and picked up on any other device, and the app opens on what you are part way through rather than on a folder browser. |
 | **Annotate** | Bookmarks, highlights in four colours, notes on a highlight, and page notes for scans with no text layer. |
+| **Notebook** | Every highlight and note from every book in one list — search it, narrow it by colour or by book from the list down the side, read one book's notes in page order, and open any entry at its page. Copy a passage with its source, add or edit a note, or delete one, without opening the book. A few highlights come back on the home page each day. |
+| **Export** | A book's highlights, notes and bookmarks — or all of them — as Markdown, page by page, for Obsidian, Logseq, Notion or a text editor. |
+| **Habit** | Today's pages against an optional goal, and your streak, beside the welcome; the last seven days and this year further down, after the book you came back for. A page counts when you arrive on it, on your own calendar day. |
+| **Quick open** | ⌘K (Ctrl K) on any page jumps to a book by title, to any section, or into a search. |
 | **Collect** | Star a favourite, or gather books into collections that cut across folders. |
 | **Share** | Mark a book shared and anyone signed in can read it — keeping their own place and notes. |
 | **On a phone** | Add to the Home Screen and it runs without browser chrome. Navigation moves to a tab bar within thumb reach, the library toolbar collapses to a single row, and the reader's secondary controls fold into one menu. |
@@ -211,7 +215,8 @@ What the library is:
 What each reader owns, separately, for the same book:
 
 ```text
-  (user, book) ──┬── ReadingProgress   where you got to
+  (user, book) ──┬── ReadingProgress   where you got to, and the day you first finished
+                 ├── ReadingDay        which pages you arrived on, per day
                  ├── Bookmark          a page you marked
                  ├── Highlight         quad points in PDF user space
                  ├── PageNote          for scans with no text layer
@@ -254,6 +259,11 @@ Why the code looks the way it does, one line each.
 | **Chrome lives in one place** | Five pages each drew their own top bar and a sixth drew none. It is a layout now — a rail on a wide screen, a tab bar on a narrow one — which took phone chrome from five rows to two. `frontend/layouts/default.vue` |
 | **Every list is bounded** | `?limit`/`?offset`, capped at 500, answering `{count, results}` rather than a bare array. The `count` is the point: a hundred books out of four hundred is otherwise indistinguishable from a library of a hundred, so the grid can say "showing 100 of 400". `library/pagination.py` |
 | **Sorting is one vocabulary** | `?sort=name` means the same thing in every listing, and asking folders for a column they lack falls back to alphabetical rather than to a direction nobody chose. `library/sorting.py` |
+| **The notebook is one UNION** | Highlights and page notes are two tables shown as one list, so PostgreSQL pages and counts the union rather than Python merging two lists — a deep page costs what the first does. Same rule as every per-book endpoint: your own notes, on books you can still open. `library/notebook.py` |
+| **A page counts when you arrive on it** | Distinct pages per reader, book and day, written only when a progress write *moves* you. Reopening where you left off is not reading, and jumping from the contents to chapter nine is one page, not two hundred. `library/activity.py` |
+| **"Today" is the reader's** | The server keeps UTC, which would end a Singapore reader's day at 8am. The browser sends its own date and the server accepts it within a day of its own. |
+| **Passages are set in a book face** | Anywhere a highlight is quoted back — the notebook, the home page, a book's page — the passage is serif and your note beside it is the app's sans, so whose words are whose does not need reading to tell. `--font-serif` |
+| **Today's highlights hold no state** | Ordered by a hash of the highlight, the user and the date: the same three all day, a different three tomorrow, and no review schedule to drift. |
 | **Bulk actions are partial by design** | An item that cannot be acted on is skipped with a reason and the rest go through. Ids owned by someone else are filtered out, not rejected — naming them would confirm the row exists. `library/bulk.py` |
 | **Folders borrow their covers** | The API sends up to four book ids and the browser tiles covers it already has. No composite exists, so nothing needs invalidating when a folder changes. A folder of only subfolders takes one cover from each in turn. `library/previews.py` |
 | **Password reset always answers 204** | Even when the mail fails: a 500 from a refused SMTP handshake says "this address exists" only for addresses that do. Failures are logged with the exception type, never the address; `manage.py check_email` is how you find a broken relay. |
@@ -319,9 +329,11 @@ tablet-specific testing is not tracked as outstanding.
 
 ## Status
 
-All seven phases built. 457 backend tests, including a 64-case object-level
-permission matrix, and 48 frontend tests over the logic that has actually broken
-here — selection ranges, cover loading states, sort labels.
+All seven phases built, and an eighth from PRD §43 — the notebook, export,
+reading activity and quick open ([design record](docs/phases/08-notebook-and-activity.md)).
+554 backend tests, including a 64-case object-level permission matrix, and 98
+frontend tests over the logic that has actually broken here — selection ranges,
+cover loading states, sort labels, which calendar day a page counts towards.
 
 ## Repository
 
@@ -329,12 +341,13 @@ here — selection ranges, cover loading states, sort labels.
 backend/            Django + DRF
   accounts/           users, sessions, password reset, preferences
   library/            folders, books, storage, uploads, reader data, sharing
-                      quota.py, retention.py, chunked.py, sorting.py, previews.py
+                      quota.py, retention.py, chunked.py, sorting.py, previews.py,
+                      notebook.py, activity.py
   api/                routing, health probes, OpenAPI schema
   common/             logging with credential redaction, advisory locks
 frontend/           Nuxt 3
   layouts/            the shell: a rail on a wide screen, a tab bar on a narrow one
-  pages/              reading now, library, reader, book detail, settings
+  pages/              reading now, library, reader, book detail, notebook, settings
   tests/              Vitest · e2e/  Playwright
 caddy/              reverse proxy configuration
 deploy/             bootstrap.sh and deploy.sh

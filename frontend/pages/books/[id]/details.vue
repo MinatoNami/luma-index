@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { formatBytes } from '~/composables/useLibrary'
+import type { NotebookEntry } from '~/composables/useNotebook'
 
 /**
  * One book, on a page of its own.
@@ -14,6 +15,7 @@ import { formatBytes } from '~/composables/useLibrary'
  */
 const route = useRoute()
 const library = useLibrary()
+const notebook = useNotebook()
 
 const bookId = computed(() => Number(route.params.id))
 
@@ -44,6 +46,48 @@ function when(iso: string | null | undefined): string {
 const annotationTotal = computed(() => {
   const a = book.value?.annotations
   return a ? a.bookmarks + a.highlights + a.notes : 0
+})
+
+const tally = computed(() => {
+  const a = book.value?.annotations
+  if (!a) return ''
+  const parts: string[] = []
+  const say = (n: number, one: string, many: string) => {
+    if (n) parts.push(`${n} ${n === 1 ? one : many}`)
+  }
+  say(a.highlights, 'highlight', 'highlights')
+  say(a.notes, 'page note', 'page notes')
+  say(a.bookmarks, 'bookmark', 'bookmarks')
+  return parts.join(' · ')
+})
+
+// The latest few, fetched in the browser: the page is useful without them, and
+// a book with hundreds of highlights should not hold up its own details.
+const latest = ref<NotebookEntry[]>([])
+const PREVIEW = 3
+async function loadLatest() {
+  latest.value = []
+  if (!book.value?.annotations.highlights && !book.value?.annotations.notes) return
+  try {
+    latest.value = (await notebook.list({ book: bookId.value, order: 'recent' },
+                                        { limit: PREVIEW })).items
+  } catch {
+    latest.value = []
+  }
+}
+onMounted(loadLatest)
+
+// Built in the browser, for the reader's date rather than the server's — see
+// the same link on the notebook page.
+const hydrated = ref(false)
+onMounted(() => { hydrated.value = true })
+const exportHref = computed(() =>
+  (hydrated.value && book.value ? notebook.exportUrl(book.value.id) : undefined))
+watch(bookId, loadLatest)
+
+const moreLabel = computed(() => {
+  const n = (book.value?.annotations.highlights ?? 0) + (book.value?.annotations.notes ?? 0)
+  return n > latest.value.length ? `See all ${n} in the notebook` : 'Open in the notebook'
 })
 </script>
 
@@ -136,24 +180,43 @@ const annotationTotal = computed(() => {
             </ul>
           </section>
 
+          <!-- What you wrote, not how much: three counts in tiles looked like
+               buttons and went nowhere. The latest few, each a way back to its
+               page, and the rest a click away in the notebook. -->
           <section aria-labelledby="notes-heading">
-            <h2 id="notes-heading">Your notes</h2>
-            <ul v-if="annotationTotal" class="counts">
-              <li class="panel">
-                <strong>{{ book.annotations.highlights }}</strong>
-                <span>{{ book.annotations.highlights === 1 ? 'Highlight' : 'Highlights' }}</span>
+            <div class="section-head">
+              <h2 id="notes-heading">Your notes</h2>
+              <span v-if="annotationTotal" class="tally">{{ tally }}</span>
+            </div>
+
+            <ol v-if="latest.length" class="latest">
+              <li v-for="entry in latest" :key="`${entry.kind}-${entry.id}`"
+                  :class="['latest-item', `pen-${entry.colour || 'none'}`]">
+                <p v-if="entry.kind === 'highlight'" class="latest-passage">{{ entry.text }}</p>
+                <p v-else class="latest-note">
+                  <span class="latest-kind">Page note</span>{{ entry.text }}
+                </p>
+                <p v-if="entry.kind === 'highlight' && entry.note" class="latest-own">{{ entry.note }}</p>
+                <NuxtLink class="latest-page" :to="`/books/${book.id}?page=${entry.page + 1}`">
+                  Page {{ entry.page + 1 }}
+                </NuxtLink>
               </li>
-              <li class="panel">
-                <strong>{{ book.annotations.bookmarks }}</strong>
-                <span>{{ book.annotations.bookmarks === 1 ? 'Bookmark' : 'Bookmarks' }}</span>
-              </li>
-              <li class="panel">
-                <strong>{{ book.annotations.notes }}</strong>
-                <span>{{ book.annotations.notes === 1 ? 'Page note' : 'Page notes' }}</span>
-              </li>
-            </ul>
+            </ol>
+
+            <div v-if="annotationTotal" class="note-actions">
+              <NuxtLink v-if="book.annotations.highlights + book.annotations.notes"
+                        class="action" :to="`/notebook?book=${book.id}`">
+                <AppIcon name="notebook" :size="16" />
+                {{ moreLabel }}
+              </NuxtLink>
+              <!-- Markdown, because it is what Obsidian, Logseq and a plain
+                   editor all take without a plugin. -->
+              <a class="action quiet" :href="exportHref" download>
+                <AppIcon name="download" :size="16" /> Export as Markdown
+              </a>
+            </div>
             <p v-else class="tertiary">
-              Nothing yet. Select text while reading to highlight it.
+              Nothing yet. Select text while reading to highlight it, or bookmark a page.
             </p>
           </section>
         </div>
@@ -238,10 +301,62 @@ const annotationTotal = computed(() => {
 }
 .tag:hover { background: var(--surface-hover); color: var(--text); }
 
-.counts { list-style: none; margin: 0; padding: 0; display: flex; gap: var(--space-3); }
-.counts li { flex: 1; padding: var(--space-3) var(--space-4); }
-.counts strong { display: block; font-size: var(--text-xl); letter-spacing: -0.02em; }
-.counts span { font-size: var(--text-sm); color: var(--text-secondary); }
+.section-head { display: flex; align-items: baseline; justify-content: space-between;
+                gap: var(--space-3); margin-bottom: var(--space-3); }
+.section-head h2 { margin: 0; }
+.tally { font-size: var(--text-sm); color: var(--text-secondary); }
+
+.latest { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.latest-item {
+  position: relative; display: grid; gap: var(--space-1);
+  padding: var(--space-3) var(--space-4) var(--space-2);
+  background: var(--surface); border: 1px solid var(--border);
+  /* The pen it was marked with, as the card's edge; page notes keep a neutral one. */
+  border-left: 4px solid var(--border);
+  border-radius: var(--radius);
+  transition: box-shadow var(--duration-fast) var(--ease);
+}
+.latest-item:hover { box-shadow: var(--shadow-md); }
+.pen-yellow { border-left-color: var(--hl-yellow); }
+.pen-green { border-left-color: var(--hl-green); }
+.pen-blue { border-left-color: var(--hl-blue); }
+.pen-pink { border-left-color: var(--hl-pink); }
+.latest-passage {
+  margin: 0; font-family: var(--font-serif); font-size: var(--text-md); line-height: 1.5;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.latest-note { margin: 0; font-size: var(--text-base); }
+.latest-kind {
+  display: block; font-size: var(--text-xs); font-weight: 600; letter-spacing: 0.04em;
+  text-transform: uppercase; color: var(--text-tertiary);
+}
+.latest-own {
+  margin: 0; font-size: var(--text-sm); color: var(--text-secondary);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.latest-page {
+  justify-self: start; min-height: 28px; display: inline-flex; align-items: center;
+  font-size: var(--text-sm); font-weight: 500; color: var(--accent-text); text-decoration: none;
+}
+/* Stretched over the card: anywhere on it opens the passage. */
+.latest-page::after { content: ""; position: absolute; inset: 0; }
+.latest-page:focus-visible { outline: none; }
+.latest-page:focus-visible::after { outline: 2px solid var(--focus); outline-offset: 2px;
+                                    border-radius: var(--radius); }
+
+.note-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-3); }
+.action {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  min-height: var(--tap-target); padding: 0 var(--space-4);
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); box-shadow: var(--shadow-sm);
+  font-size: var(--text-base); font-weight: 500; text-decoration: none;
+}
+.action:hover { background: var(--surface-hover); color: var(--text); }
+/* Export is the rarer of the two, so it does not ask for the same attention. */
+.action.quiet { background: transparent; border-color: transparent; box-shadow: none;
+                color: var(--text-secondary); }
+.action.quiet:hover { background: var(--surface-hover); color: var(--text); }
 
 @media (max-width: 48rem) {
   .columns { grid-template-columns: minmax(0, 1fr); gap: var(--space-5); }
