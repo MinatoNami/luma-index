@@ -864,19 +864,19 @@ class BookProgressView(OwnedMixin, APIView):
                 page = min(page, book.page_count - 1)
             moved = page != record.page
             now = timezone.now()
+            day = activity.local_today(data.get("local_date"))
             record.page = page
             record.page_fraction = data["page_fraction"]
             record.percentage = self._percentage(page, data["page_fraction"], book.page_count)
             record.last_opened_at = now
             record.client_updated_at = incoming
-            activity.mark_finished(record, now)
+            activity.mark_finished(record, now, day)
             record.save()
 
             # Arriving somewhere new is reading; reopening where you left off,
             # or the same page reported again while you sit on it, is not.
             if moved:
-                activity.record_arrival(request.user, book, page,
-                                        activity.local_today(data.get("local_date")))
+                activity.record_arrival(request.user, book, page, day)
 
         return Response(ReadingProgressSerializer(record).data)
 

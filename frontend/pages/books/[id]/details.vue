@@ -76,6 +76,13 @@ async function loadLatest() {
   }
 }
 onMounted(loadLatest)
+
+// Built in the browser, for the reader's date rather than the server's — see
+// the same link on the notebook page.
+const hydrated = ref(false)
+onMounted(() => { hydrated.value = true })
+const exportHref = computed(() =>
+  (hydrated.value && book.value ? notebook.exportUrl(book.value.id) : undefined))
 watch(bookId, loadLatest)
 
 const moreLabel = computed(() => {
@@ -204,7 +211,7 @@ const moreLabel = computed(() => {
               </NuxtLink>
               <!-- Markdown, because it is what Obsidian, Logseq and a plain
                    editor all take without a plugin. -->
-              <a class="action quiet" :href="notebook.exportUrl(book.id)" download>
+              <a class="action quiet" :href="exportHref" download>
                 <AppIcon name="download" :size="16" /> Export as Markdown
               </a>
             </div>

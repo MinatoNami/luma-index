@@ -466,6 +466,10 @@ class ReadingProgress(models.Model):
     # `percentage` alone cannot say *when*, which is the whole of "books
     # finished this year".
     finished_at = models.DateTimeField(null=True, blank=True)
+    # The same moment as a date on the reader's own calendar, for "finished
+    # this year". `finished_at` is UTC: a book finished at 00:30 on 1 January
+    # in Singapore is 31 December there, and would count towards the wrong year.
+    finished_on = models.DateField(null=True, blank=True)
 
     class Meta:
         constraints = [

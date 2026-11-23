@@ -7,7 +7,7 @@ is the reader's own.
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from django.test import Client
@@ -240,3 +240,29 @@ def test_the_goal_is_a_setting_and_is_bounded(api):
         refused = api.patch(url, {"daily_page_goal": nonsense},
                             content_type="application/json", headers=api.headers)
         assert refused.status_code == 400
+
+
+@pytest.mark.django_db
+def test_a_book_finished_just_after_midnight_counts_towards_the_readers_new_year(api, user):
+    """00:30 on 1 January in Singapore is still 31 December in UTC. The count
+    goes by the reader's calendar, as the streak does."""
+    book = make_book(user, pages=10)
+    move(api, book, 9, fraction=1.0, local_date=today().isoformat())
+    record = ReadingProgress.objects.get()
+    assert record.finished_on == today()
+
+    # The moment itself fell in last year by UTC; the reader's day did not.
+    record.finished_at = datetime(today().year - 1, 12, 31, 16, 30, tzinfo=UTC)
+    record.save()
+
+    year = api.get(reverse("library:activity"), {"today": today().isoformat()}).json()["year"]
+    assert year["books_finished"] == 1
+
+
+@pytest.mark.django_db
+def test_an_overlong_local_date_still_saves_the_position(api, user):
+    """The date is a nicety; the place in the book is what must not be lost."""
+    book = make_book(user)
+    move(api, book, 6, local_date=f"{today().isoformat()}T07:30:00+08:00 Asia/Singapore extra")
+    assert ReadingProgress.objects.get().page == 6
+    assert pages_on(user, today()) == [6]

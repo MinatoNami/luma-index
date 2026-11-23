@@ -106,13 +106,18 @@ async function loadShelf() {
 }
 
 async function more() {
+  // Tied to the listing it extends: if the filters change while this is in
+  // flight, `load()` replaces the list, and appending this page to it would
+  // put one book's notes under another's name and overwrite the new total.
+  const mine = generation
   loadingMore.value = true
   try {
     const page = await notebook.list(filters(), { limit: PAGE, offset: items.value.length })
+    if (mine !== generation) return
     items.value = [...items.value, ...page.items]
     total.value = page.total
   } catch {
-    error.value = 'More could not be loaded.'
+    if (mine === generation) error.value = 'More could not be loaded.'
   } finally {
     loadingMore.value = false
   }
@@ -206,6 +211,14 @@ const summary = computed(() => {
 })
 
 const scope = computed(() => selectedBook.value?.title ?? '')
+
+// Built in the browser: the link carries the reader's date for the file's
+// stamp, and rendered on the server it would carry the server's — which Vue
+// does not correct on hydration, so before 8am in Singapore every export
+// would be dated yesterday.
+const hydrated = ref(false)
+onMounted(() => { hydrated.value = true })
+const exportHref = computed(() => (hydrated.value ? notebook.exportUrl(bookId.value) : undefined))
 </script>
 
 <template>
@@ -222,7 +235,7 @@ const scope = computed(() => selectedBook.value?.title ?? '')
       </div>
       <!-- The label repeats the visible words, so voice control can still say
            "click Export" when the phone layout hides them. -->
-      <a class="export" :href="notebook.exportUrl(bookId)" download
+      <a class="export" :href="exportHref" download
          :aria-label="bookId ? 'Export this book\'s notes as Markdown'
            : 'Export all notes as Markdown'">
         <AppIcon name="download" :size="16" />

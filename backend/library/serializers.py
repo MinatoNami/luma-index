@@ -151,7 +151,9 @@ class ProgressWriteSerializer(serializers.Serializer):
     # now counts towards. A string rather than a DateField so that a client
     # with a malformed one still saves its position — the date falls back to
     # the server's; the place in the book is what must not be lost.
-    local_date = serializers.CharField(required=False, allow_blank=True, max_length=32)
+    # No max_length: an over-long value would 400 the whole write, and the
+    # place in the book with it. `local_today` reads the first ten characters.
+    local_date = serializers.CharField(required=False, allow_blank=True)
 
 
 class SharedBookSerializer(serializers.ModelSerializer):

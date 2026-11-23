@@ -215,7 +215,7 @@ What the library is:
 What each reader owns, separately, for the same book:
 
 ```text
-  (user, book) ──┬── ReadingProgress   where you got to, and when you first finished
+  (user, book) ──┬── ReadingProgress   where you got to, and the day you first finished
                  ├── ReadingDay        which pages you arrived on, per day
                  ├── Bookmark          a page you marked
                  ├── Highlight         quad points in PDF user space
@@ -331,7 +331,7 @@ tablet-specific testing is not tracked as outstanding.
 
 All seven phases built, and an eighth from PRD §43 — the notebook, export,
 reading activity and quick open ([design record](docs/phases/08-notebook-and-activity.md)).
-552 backend tests, including a 64-case object-level permission matrix, and 98
+554 backend tests, including a 64-case object-level permission matrix, and 98
 frontend tests over the logic that has actually broken here — selection ranges,
 cover loading states, sort labels, which calendar day a page counts towards.
 

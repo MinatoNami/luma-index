@@ -123,9 +123,15 @@ The first cut worked and was in the wrong order. What changed, and why:
   every place, marks the typed text in titles, and puts the two searches above
   the places, where a long title list cannot push them out of sight.
 
-**Left open:** the phone's tab bar has five tabs and the notebook is not one of
-them; on a phone it is reached from the home page and from each book's page.
-Which tab gives way is a navigation decision, not a styling one.
+**The phone tab bar has six tabs.** The notebook joined Reading, Library,
+Favourites, Collections and Settings. At about 62px a tab on a 375px phone,
+"Reading now" is shortened to "Reading" in the tab bar only, and the labels are
+set a pixel smaller so none of them is cut off.
+
+**Finished books count by the reader's calendar.** `ReadingProgress.finished_on`
+is set from the same validated local date as page arrivals, the first time a
+book is finished, and the yearly count uses that rather than the UTC date of
+`finished_at`. Older rows are backfilled from that UTC date.
 
 ## Not built
 

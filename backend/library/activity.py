@@ -108,10 +108,12 @@ def summary(user, today: date, *, goal: int) -> dict:
     year_start = date(today.year, 1, 1)
     this_year = {day: pages for day, pages in by_day.items() if year_start <= day <= today}
 
+    # By the reader's calendar, like everything else here — not by
+    # finished_at, whose date is UTC's.
     finished = (
         ReadingProgress.objects
-        .filter(user=user, finished_at__isnull=False, book__deleted_at__isnull=True,
-                finished_at__date__gte=year_start)
+        .filter(user=user, book__deleted_at__isnull=True,
+                finished_on__gte=year_start, finished_on__lte=today)
         .count()
     )
 
@@ -129,7 +131,9 @@ def summary(user, today: date, *, goal: int) -> dict:
     }
 
 
-def mark_finished(record: ReadingProgress, now: datetime) -> None:
-    """Stamp the first time a reader reaches the end, and only the first."""
+def mark_finished(record: ReadingProgress, now: datetime, day: date) -> None:
+    """Stamp the first time a reader reaches the end, and only the first —
+    as a moment, and as the day it was on the reader's own calendar."""
     if record.is_finished and record.finished_at is None:
         record.finished_at = now
+        record.finished_on = day
