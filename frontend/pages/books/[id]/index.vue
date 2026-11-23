@@ -4,7 +4,7 @@ import type { Book } from '~/composables/useLibrary'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 
 import type { Highlight, HighlightColour, Quad } from '~/composables/useAnnotations'
-import { localDate } from '~/composables/useNotebook'
+import { progressBody, type ReadingPosition } from '~/composables/readingProgress'
 
 // Full bleed: the reader draws its own chrome, which hides on scroll, and a
 // rail down the side would take width from the page and never get out of
@@ -257,39 +257,42 @@ const percentage = computed(() =>
 
 // -- progress -------------------------------------------------------------- //
 
-let pending: { page: number; fraction: number } | null = null
+let pending: ReadingPosition | null = null
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 
-function onPosition(position: { page: number; fraction: number }) {
+function onPosition(position: ReadingPosition) {
   page.value = position.page + 1
   pending = position
   // Debounced: a scroll produces a position on every frame, and §21 asks for
   // throttled writes rather than one per pixel.
   if (saveTimer) return
-  saveTimer = setTimeout(() => {
-    saveTimer = null
-    flush()
-  }, 4000)
+  saveTimer = setTimeout(() => flush(), 4000)
 }
 
-async function flush() {
+/**
+ * Send the latest position now, if there is one not yet sent.
+ *
+ * `keepalive` is for when the page is going away. The browser carries such a
+ * request on after the document is gone, where it would cancel any other —
+ * and nothing is awaited before it, because nothing awaited at that point is
+ * sure to run. So it skips `ensureCsrf()` and relies on the CSRF cookie being
+ * there already, which it is for anyone who has signed in.
+ */
+async function flush({ keepalive = false } = {}) {
+  // Whatever was scheduled is this write, sent early.
+  if (saveTimer) {
+    clearTimeout(saveTimer)
+    saveTimer = null
+  }
   if (!pending) return
   const position = pending
   pending = null
   try {
-    await ensureCsrf()
+    if (!keepalive) await ensureCsrf()
     await api(`/library/books/${bookId.value}/progress`, {
       method: 'PUT',
-      body: {
-        page: position.page,
-        page_fraction: position.fraction,
-        // Lets the server drop this write if a later position already arrived
-        // from another device.
-        client_updated_at: new Date().toISOString(),
-        // The day this page counts towards, in the reader's own calendar
-        // rather than the server's UTC one — see library/activity.py.
-        local_date: localDate(),
-      },
+      body: progressBody(position),
+      keepalive,
     })
   } catch {
     // Losing a progress update is not worth interrupting a reader over.
@@ -298,23 +301,33 @@ async function flush() {
 
 // pagehide rather than unload: it is the one that actually fires on mobile
 // Safari when a tab is closed or backgrounded.
+//
+// A keepalive fetch rather than sendBeacon, which can only POST — this
+// endpoint takes PUT — and cannot set the X-CSRFToken header Django wants on
+// every unsafe method. The beacon that used to be here was refused on both
+// counts, so the last few seconds of every session were never saved.
 function onPageHide() {
-  if (!pending) return
-  const position = pending
-  navigator.sendBeacon?.(
-    apiUrl(`/library/books/${bookId.value}/progress`),
-    new Blob([JSON.stringify(position)], { type: 'application/json' }),
-  )
+  flush({ keepalive: true })
+}
+
+// And on being hidden, because pagehide alone is not enough on a phone. A tab
+// switched away from — another app, the home screen, the tab switcher — gets
+// visibilitychange, and may then be discarded by the OS without ever seeing a
+// pagehide. Hidden is the last moment a backgrounded reader is sure to get.
+// Whichever of the two comes second finds nothing pending and sends nothing.
+function onVisibilityChange() {
+  if (document.visibilityState === 'hidden') flush({ keepalive: true })
 }
 
 onMounted(() => {
   window.addEventListener('pagehide', onPageHide)
+  document.addEventListener('visibilitychange', onVisibilityChange)
   window.addEventListener('keydown', onKey)
 })
 onBeforeUnmount(() => {
   window.removeEventListener('pagehide', onPageHide)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
   window.removeEventListener('keydown', onKey)
-  if (saveTimer) clearTimeout(saveTimer)
   flush()
 })
 
