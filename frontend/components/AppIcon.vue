@@ -39,6 +39,10 @@ const PATHS: Record<string, string> = {
   'star-filled': 'M12 3.6l2.6 5.3 5.8.85-4.2 4.1 1 5.75L12 16.9l-5.2 2.7 1-5.75-4.2-4.1 5.8-.85z',
   collection: 'M4 7.5A1.5 1.5 0 0 1 5.5 6h13A1.5 1.5 0 0 1 20 7.5v11a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5Z M7 6V4.5h10V6 M8 11h8 M8 15h5',
   inbox: 'M4 13h4l1.5 3h5L16 13h4M4 13 6.8 5.7A2 2 0 0 1 8.7 4.4h6.6a2 2 0 0 1 1.9 1.3L20 13v5.5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z',
+  notebook: 'M6.5 3.5h10A1.5 1.5 0 0 1 18 5v14a1.5 1.5 0 0 1-1.5 1.5h-10A1.5 1.5 0 0 1 5 19V5a1.5 1.5 0 0 1 1.5-1.5Z M8.5 3.5v17 M11 8h4 M11 11.5h4',
+  flame: 'M12 21a6 6 0 0 0 6-6c0-3.6-2.6-5.6-3.6-8.6-.5 2-1.6 3.1-2.8 3.6C11.8 7.4 10.6 5 8.4 3c.5 3.6-2.4 6.3-2.4 10a6 6 0 0 0 6 8Z',
+  'flame-filled': 'M12 21a6 6 0 0 0 6-6c0-3.6-2.6-5.6-3.6-8.6-.5 2-1.6 3.1-2.8 3.6C11.8 7.4 10.6 5 8.4 3c.5 3.6-2.4 6.3-2.4 10a6 6 0 0 0 6 8Z',
+  quote: 'M10 7H6.5A1.5 1.5 0 0 0 5 8.5V12h4v1.5a3 3 0 0 1-3 3 M19 7h-3.5A1.5 1.5 0 0 0 14 8.5V12h4v1.5a3 3 0 0 1-3 3 M9 12V7 M18 12V7',
 }
 
 const segments = computed(() => (PATHS[props.name] ?? '').split(' M').map((d, i) => (i ? `M${d}` : d)))
@@ -46,7 +50,7 @@ const segments = computed(() => (PATHS[props.name] ?? '').split(' M').map((d, i)
 
 <template>
   <svg class="icon" :width="props.size" :height="props.size" viewBox="0 0 24 24"
-       :fill="props.name === 'star-filled' ? 'currentColor' : 'none'"
+       :fill="props.name.endsWith('-filled') ? 'currentColor' : 'none'"
        stroke="currentColor" stroke-width="1.6" stroke-linecap="round"
        stroke-linejoin="round" aria-hidden="true" focusable="false">
     <path v-for="(d, i) in segments" :key="i" :d="d" />

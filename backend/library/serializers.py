@@ -147,6 +147,13 @@ class ProgressWriteSerializer(serializers.Serializer):
     # Optional. When present it is compared against the stored value to drop a
     # write that was recorded earlier than what the server already has.
     client_updated_at = serializers.DateTimeField(required=False, allow_null=True)
+    # Optional, YYYY-MM-DD: the reader's own date, which is the day a page read
+    # now counts towards. A string rather than a DateField so that a client
+    # with a malformed one still saves its position — the date falls back to
+    # the server's; the place in the book is what must not be lost.
+    # No max_length: an over-long value would 400 the whole write, and the
+    # place in the book with it. `local_today` reads the first ten characters.
+    local_date = serializers.CharField(required=False, allow_blank=True)
 
 
 class SharedBookSerializer(serializers.ModelSerializer):
@@ -427,3 +434,84 @@ class ChunkedUploadStartSerializer(serializers.Serializer):
     filename = serializers.CharField(max_length=512)
     size = serializers.IntegerField(min_value=1)
     folder = serializers.IntegerField(required=False, allow_null=True)
+
+
+# --------------------------------------------------------------------------- #
+# Notebook and activity — response shapes, for the schema
+# --------------------------------------------------------------------------- #
+
+class BookRefSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    title = serializers.CharField()
+
+
+class NotebookEntrySerializer(serializers.Serializer):
+    """A highlight or a page note, as the notebook lists them."""
+
+    kind = serializers.ChoiceField(choices=["highlight", "note"])
+    id = serializers.IntegerField()
+    book = BookRefSerializer()
+    page = serializers.IntegerField(help_text="0-indexed.")
+    text = serializers.CharField(help_text="The passage, or the page note's body.")
+    note = serializers.CharField(help_text="A highlight's note. Empty for page notes.")
+    colour = serializers.CharField(help_text="A highlight's colour. Empty for page notes.")
+    created_at = serializers.DateTimeField()
+    updated_at = serializers.DateTimeField()
+
+
+class NotebookBookSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    title = serializers.CharField()
+    highlights = serializers.IntegerField()
+    notes = serializers.IntegerField(help_text="Page notes.")
+    last_at = serializers.DateTimeField(help_text="When the latest was made.")
+
+
+class NotebookTotalsSerializer(serializers.Serializer):
+    highlights = serializers.IntegerField()
+    notes = serializers.IntegerField()
+
+
+class NotebookBooksSerializer(serializers.Serializer):
+    count = serializers.IntegerField(help_text="How many books in total, not how many arrived.")
+    totals = NotebookTotalsSerializer()
+    results = NotebookBookSerializer(many=True)
+
+
+class DailyHighlightSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    book = BookRefSerializer()
+    page = serializers.IntegerField(help_text="0-indexed.")
+    text = serializers.CharField()
+    note = serializers.CharField()
+    colour = serializers.CharField()
+
+
+class DailySerializer(serializers.Serializer):
+    date = serializers.DateField()
+    results = DailyHighlightSerializer(many=True)
+
+
+class ActivityDaySerializer(serializers.Serializer):
+    date = serializers.DateField()
+    pages = serializers.IntegerField()
+
+
+class StreakSerializer(serializers.Serializer):
+    current = serializers.IntegerField()
+    longest = serializers.IntegerField()
+
+
+class YearSerializer(serializers.Serializer):
+    pages = serializers.IntegerField()
+    days = serializers.IntegerField()
+    books_finished = serializers.IntegerField()
+
+
+class ActivitySerializer(serializers.Serializer):
+    today = serializers.DateField()
+    goal_pages = serializers.IntegerField(help_text="Pages a day. 0 means no goal.")
+    today_pages = serializers.IntegerField()
+    streak = StreakSerializer()
+    week = ActivityDaySerializer(many=True, help_text="The last seven days, oldest first.")
+    year = YearSerializer()

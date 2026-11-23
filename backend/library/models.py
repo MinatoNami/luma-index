@@ -17,6 +17,7 @@ may be the only copy the user has, so an accidental click must be recoverable.
 from __future__ import annotations
 
 from django.conf import settings
+from django.contrib.postgres.fields import ArrayField
 from django.contrib.postgres.indexes import GinIndex
 from django.contrib.postgres.search import SearchVectorField
 from django.core.exceptions import ValidationError
@@ -460,6 +461,15 @@ class ReadingProgress(models.Model):
     # The client's own clock at the moment it recorded this position. Used only
     # to reject a stale write — see the progress endpoint.
     client_updated_at = models.DateTimeField(null=True, blank=True)
+    # The first time the reader reached the end. Kept when they go back to
+    # reread a chapter, because "I finished this in March" stays true — and
+    # `percentage` alone cannot say *when*, which is the whole of "books
+    # finished this year".
+    finished_at = models.DateTimeField(null=True, blank=True)
+    # The same moment as a date on the reader's own calendar, for "finished
+    # this year". `finished_at` is UTC: a book finished at 00:30 on 1 January
+    # in Singapore is 31 December there, and would count towards the wrong year.
+    finished_on = models.DateField(null=True, blank=True)
 
     class Meta:
         constraints = [
@@ -479,6 +489,42 @@ class ReadingProgress(models.Model):
     @property
     def is_started(self) -> bool:
         return 0 < self.percentage < 99.5
+
+
+class ReadingDay(models.Model):
+    """Which pages of a book a reader arrived on, on one day of their own.
+
+    The raw material for streaks and a daily goal (PRD §43). ReadingProgress
+    says where you are; it cannot say whether you read yesterday, because it
+    is overwritten on every move.
+
+    Distinct pages rather than a counter, so that scrolling back and forth over
+    one spread is one page and not twenty, and jumping from the contents to
+    chapter nine is one page and not two hundred. `day` is the reader's own
+    calendar date, as their device reported it: a streak that rolls over at
+    08:00 because the server keeps UTC is not a streak anyone recognises.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="reading_days"
+    )
+    book = models.ForeignKey(Book, on_delete=models.CASCADE, related_name="reading_days")
+    day = models.DateField()
+    # 0-indexed, like every other page number here. Bounded by the book's page
+    # count, so a long day in a long book is a few hundred small integers.
+    pages = ArrayField(models.PositiveIntegerField(), default=list)
+
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["user", "book", "day"],
+                                    name="one_reading_day_per_book")
+        ]
+        indexes = [models.Index(fields=["user", "-day"])]
+
+    def __str__(self) -> str:
+        return f"{self.user} read {len(self.pages)} pages of {self.book_id} on {self.day}"
 
 
 class Bookmark(models.Model):
