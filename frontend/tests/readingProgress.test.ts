@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { nextWrite, progressBody } from '~/composables/readingProgress'
+import { nextWrite, progressBody, savePlan } from '~/composables/readingProgress'
 import { localDate } from '~/composables/useNotebook'
 
 /**
@@ -75,5 +75,30 @@ describe('which write to send', () => {
 
   it('has nothing to send when nothing is pending or outstanding', () => {
     expect(nextWrite(null, null, { leaving: true, now })).toBeNull()
+  })
+})
+
+/**
+ * How each kind of save is sent. The case from review on #3: a save fails,
+ * then the reader opens the book's details inside the app. The reader
+ * unmounts with no pagehide, so unless unmounting counts as leaving, the kept
+ * write is never resent and the position is lost.
+ */
+describe('how a save is sent, by why it is made', () => {
+  it('leaves an unconfirmed write alone while the reader is still reading', () => {
+    expect(savePlan('timer')).toEqual({ leaving: false, awaitCsrf: true })
+  })
+
+  it('resends a kept write when leaving the reader inside the app, CSRF allowed', () => {
+    expect(savePlan('navigate')).toEqual({ leaving: true, awaitCsrf: true })
+  })
+
+  it('resends a kept write as the tab goes away, awaiting nothing first', () => {
+    expect(savePlan('unload')).toEqual({ leaving: true, awaitCsrf: false })
+  })
+
+  it('so a failed save followed by in-app navigation is sent again', () => {
+    const failed = { position: { page: 7, fraction: 0.5 }, at: new Date('2026-11-21T07:30:00Z') }
+    expect(nextWrite(null, failed, { leaving: savePlan('navigate').leaving })).toBe(failed)
   })
 })

@@ -5,7 +5,8 @@ import type { PDFDocumentProxy } from 'pdfjs-dist'
 
 import type { Highlight, HighlightColour, Quad } from '~/composables/useAnnotations'
 import {
-  nextWrite, progressBody, type ProgressWrite, type ReadingPosition,
+  nextWrite, progressBody, savePlan,
+  type ProgressWrite, type ReadingPosition, type SaveReason,
 } from '~/composables/readingProgress'
 
 // Full bleed: the reader draws its own chrome, which hides on scroll, and a
@@ -271,7 +272,7 @@ function onPosition(position: ReadingPosition) {
   // Debounced: a scroll produces a position on every frame, and §21 asks for
   // throttled writes rather than one per pixel.
   if (saveTimer) return
-  saveTimer = setTimeout(() => flush(), 4000)
+  saveTimer = setTimeout(() => flush('timer'), 4000)
 }
 
 /**
@@ -281,13 +282,13 @@ function onPosition(position: ReadingPosition) {
  * carries such a request on after the document is gone — so the ordinary
  * four-second save is not cancelled if the tab closes while it is on its way.
  *
- * `leaving` is for when the page is going away. Then nothing is awaited before
- * the request, because nothing awaited at that point is sure to run: it skips
- * `ensureCsrf()` and relies on the CSRF cookie being there already, which it is
- * for anyone who has signed in. And a write still unacknowledged is sent again,
- * in case it was the one the browser dropped.
+ * `reason` says what is happening — see `savePlan`. Leaving the book, by any
+ * route, resends a write still unacknowledged, in case it failed or was the one
+ * the browser dropped. Only a page that is unloading skips `ensureCsrf()`,
+ * relying on the cookie being there already, as it is for anyone signed in.
  */
-async function flush({ leaving = false } = {}) {
+async function flush(reason: SaveReason = 'timer') {
+  const { leaving, awaitCsrf } = savePlan(reason)
   // Whatever was scheduled is this write, sent early.
   if (saveTimer) {
     clearTimeout(saveTimer)
@@ -298,7 +299,7 @@ async function flush({ leaving = false } = {}) {
   pending = null
   inFlight = write
   try {
-    if (!leaving) await ensureCsrf()
+    if (awaitCsrf) await ensureCsrf()
     await api(`/library/books/${bookId.value}/progress`, {
       method: 'PUT',
       body: progressBody(write.position, write.at),
@@ -321,7 +322,7 @@ async function flush({ leaving = false } = {}) {
 // every unsafe method. The beacon that used to be here was refused on both
 // counts, so the last few seconds of every session were never saved.
 function onPageHide() {
-  flush({ leaving: true })
+  flush('unload')
 }
 
 // And on being hidden, because pagehide alone is not enough on a phone. A tab
@@ -331,7 +332,7 @@ function onPageHide() {
 // Whichever comes second may resend an unacknowledged write; the same write
 // twice, with one timestamp, saves the same position.
 function onVisibilityChange() {
-  if (document.visibilityState === 'hidden') flush({ leaving: true })
+  if (document.visibilityState === 'hidden') flush('unload')
 }
 
 onMounted(() => {
@@ -343,7 +344,9 @@ onBeforeUnmount(() => {
   window.removeEventListener('pagehide', onPageHide)
   document.removeEventListener('visibilitychange', onVisibilityChange)
   window.removeEventListener('keydown', onKey)
-  flush()
+  // Leaving the reader inside the app: no pagehide will come, so this is the
+  // last chance to resend a save that failed or is still unconfirmed.
+  flush('navigate')
 })
 
 // -- navigation ------------------------------------------------------------- //
